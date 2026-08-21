@@ -114,7 +114,7 @@ export async function loginUser(formData: FormData): Promise<AuthState> {
 
   let loginEmail = identifier.toLowerCase();
 
-  // Nếu người dùng không nhập định dạng email (ví dụ nhập mã HS "HS01"), tìm email tương ứng trong profiles
+  // Nếu người dùng không nhập định dạng email (ví dụ nhập mã HS "12A101"), tìm email tương ứng trong profiles
   if (!identifier.includes("@")) {
     const { data: profile, error: profileErr } = await adminClient
       .from("profiles")
@@ -123,7 +123,7 @@ export async function loginUser(formData: FormData): Promise<AuthState> {
       .single();
 
     if (profileErr || !profile) {
-      return { error: `Không tìm thấy học sinh với mã "${identifier}"! Vui lòng kiểm tra lại.` };
+      return { error: `Không tìm thấy học sinh với tài khoản "${identifier}"! Vui lòng kiểm tra lại.` };
     }
     loginEmail = profile.email;
   }
@@ -159,15 +159,24 @@ export async function loginUser(formData: FormData): Promise<AuthState> {
     return { error: `Đăng nhập không thành công: ${signInErr?.message || "Lỗi không xác định"}` };
   }
 
-  // Lấy role của user để xác định trang điều hướng
+  // Lấy role & cờ đổi mật khẩu của user để xác định trang điều hướng
   const { data: profile } = await adminClient
     .from("profiles")
-    .select("role")
+    .select("role, must_change_password")
     .eq("id", signInData.user.id)
     .single();
 
   const role = profile?.role || "teacher";
-  const redirectUrl = role === "student" ? "/student" : "/dashboard";
+  let redirectUrl = "/dashboard";
+
+  if (role === "student") {
+    // Nếu học sinh đăng nhập lần đầu (chưa đổi mật khẩu) -> LẬP TỨC chuyển đến màn hình đổi mật khẩu
+    if (profile?.must_change_password !== false) {
+      redirectUrl = "/student/change-password";
+    } else {
+      redirectUrl = "/student";
+    }
+  }
 
   return {
     success: true,
