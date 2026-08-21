@@ -16,6 +16,7 @@ import {
   BookOpen,
   ArrowRight,
   ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 
 export default async function StudentPortalPage() {
@@ -26,6 +27,12 @@ export default async function StudentPortalPage() {
   }
 
   const { profile, classes, upcomingSchedules } = data;
+
+  // Nếu học sinh đăng nhập lần đầu và chưa đổi mật khẩu -> Chuyển hướng bắt buộc đổi mật khẩu
+  if (profile.must_change_password) {
+    redirect("/student/change-password");
+  }
+
   const nextSession = upcomingSchedules[0] || null;
 
   return (
@@ -49,10 +56,20 @@ export default async function StudentPortalPage() {
               <span className="font-mono font-bold text-cyan-300">{profile.student_code}</span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <Link
+                href="/student/change-password"
+                title="Đổi mật khẩu"
+                className="p-2 rounded-xl text-slate-400 hover:text-cyan-300 hover:bg-white/5 transition-all border border-white/5 flex items-center gap-1.5 text-xs font-medium"
+              >
+                <KeyRound className="w-4 h-4" />
+                <span className="hidden sm:inline">Đổi MK</span>
+              </Link>
+
               <span className="text-xs font-semibold text-white hidden sm:inline-block">
                 {profile.full_name}
               </span>
+
               <form action={logoutUser}>
                 <button
                   type="submit"

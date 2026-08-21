@@ -9,11 +9,17 @@ CREATE TABLE IF NOT EXISTS profiles (
     full_name TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('teacher', 'student')),
     phone TEXT,
+    contact_email TEXT, -- Email phụ huynh / học sinh để gửi thông báo
+    must_change_password BOOLEAN DEFAULT TRUE, -- Yêu cầu đổi mật khẩu khi đăng nhập lần đầu
     student_code TEXT UNIQUE, -- Mã học sinh ví dụ: HS001 (chỉ dành cho student)
     avatar_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Thêm cột nếu bảng profiles đã tồn tại từ trước
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT TRUE;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS contact_email TEXT;
 
 -- 2. Bảng CLASSES: Lớp học
 CREATE TABLE IF NOT EXISTS classes (
