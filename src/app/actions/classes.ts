@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { generateStudentCode } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -122,7 +123,7 @@ export async function updateClass(formData: FormData) {
 }
 
 /**
- * Xóa một Lớp học (Tự động xóa danh sách học sinh và lịch học liên quan)
+ * Xóa một Lớp học
  */
 export async function deleteClass(classId: string) {
   if (!classId) return { error: "Thiếu mã lớp học!" };
@@ -172,14 +173,12 @@ export async function getClassDetails(classId: string) {
         id,
         full_name,
         email,
-        contact_email,
         student_code,
-        phone,
-        must_change_password
+        phone
       )
     `)
     .eq("class_id", classId)
-    .order("joined_at", { ascending: false });
+    .order("joined_at", { ascending: true });
 
   // Lấy lịch học của lớp
   const { data: schedules } = await supabase
@@ -201,21 +200,33 @@ export async function getClassDetails(classId: string) {
 }
 
 /**
- * Thêm học sinh mới vào lớp (Phương án A + Hỗ trợ Email tùy chọn + Bắt buộc đổi mật khẩu)
+ * Thêm học sinh đơn lẻ vào lớp
  */
 export async function addStudentToClass(formData: FormData) {
   const classId = formData.get("classId") as string;
   const fullName = (formData.get("fullName") as string)?.trim();
-  const studentCode = (formData.get("studentCode") as string)?.trim().toUpperCase();
+  let studentCode = (formData.get("studentCode") as string)?.trim().toUpperCase();
   const phone = (formData.get("phone") as string)?.trim() || "";
   const contactEmail = (formData.get("contactEmail") as string)?.trim() || "";
   const password = (formData.get("password") as string)?.trim() || "123456";
 
-  if (!classId || !fullName || !studentCode) {
-    return { error: "Vui lòng nhập đầy đủ Họ tên và Mã học sinh (VD: HS01)!" };
+  if (!classId || !fullName) {
+    return { error: "Vui lòng nhập đầy đủ Họ tên học sinh!" };
   }
 
   const adminClient = createAdminClient();
+
+  // Nếu giáo viên không nhập mã HS, tự sinh theo quy tắc: [Tên Lớp] + [STT 2 số] (VD: 12A101)
+  if (!studentCode) {
+    const { data: cls } = await adminClient.from("classes").select("name").eq("id", classId).single();
+    const { count } = await adminClient
+      .from("class_members")
+      .select("*", { count: "exact", head: true })
+      .eq("class_id", classId);
+
+    studentCode = generateStudentCode(cls?.name || "HS", (count || 0) + 1);
+  }
+
   const internalEmail = `${studentCode.toLowerCase()}@chemclass.local`;
 
   // 1. Kiểm tra xem học sinh có mã này đã tồn tại chưa
@@ -228,7 +239,7 @@ export async function addStudentToClass(formData: FormData) {
   let studentUserId = existingProfile?.id;
 
   if (!studentUserId) {
-    // 2. Nếu chưa có, tạo tài khoản trong Supabase Auth
+    // 2. Tạo tài khoản trong Supabase Auth
     const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
       email: internalEmail,
       password: password,
@@ -246,20 +257,29 @@ export async function addStudentToClass(formData: FormData) {
 
     studentUserId = authUser.user.id;
 
-    // 3. Lưu thông tin vào bảng profiles (kèm cờ must_change_password = true)
-    const { error: profErr } = await adminClient.from("profiles").upsert({
+    // 3. Lưu thông tin cơ bản vào bảng profiles
+    const profilePayload: any = {
       id: studentUserId,
       email: internalEmail,
       full_name: fullName,
       role: "student",
       student_code: studentCode,
       phone: phone || null,
-      contact_email: contactEmail || null,
-      must_change_password: true,
-    });
+    };
 
+    const { error: profErr } = await adminClient.from("profiles").upsert(profilePayload);
     if (profErr) {
       return { error: `Lỗi lưu hồ sơ học sinh: ${profErr.message}` };
+    }
+
+    // Cập nhật thêm các trường mở rộng nếu có
+    try {
+      await adminClient.from("profiles").update({
+        contact_email: contactEmail || null,
+        must_change_password: true,
+      }).eq("id", studentUserId);
+    } catch {
+      // Bỏ qua nếu chưa chạy SQL tạo cột
     }
   }
 
@@ -298,14 +318,14 @@ export async function resetStudentPassword(studentId: string, classId: string, d
     return { error: `Lỗi reset mật khẩu: ${authErr.message}` };
   }
 
-  // 2. Bật lại cờ must_change_password = true để bắt học sinh đổi lại mật khẩu khi đăng nhập
+  // 2. Bật lại cờ must_change_password = true
   try {
     await adminClient
       .from("profiles")
       .update({ must_change_password: true })
       .eq("id", studentId);
-  } catch (err) {
-    console.warn("Lỗi update cờ must_change_password:", err);
+  } catch {
+    // Bỏ qua nếu cột chưa tồn tại
   }
 
   revalidatePath(`/dashboard/classes/${classId}`);
@@ -313,12 +333,12 @@ export async function resetStudentPassword(studentId: string, classId: string, d
 }
 
 /**
- * Nhập danh sách học sinh hàng loạt từ file Excel
+ * Nhập danh sách học sinh hàng loạt từ file Excel (Tự động tạo mã dạng 12A101, 12A102 nếu thiếu)
  */
 export async function importStudentsFromExcel(
   classId: string,
   studentsList: Array<{
-    studentCode: string;
+    studentCode?: string;
     fullName: string;
     phone?: string;
     contactEmail?: string;
@@ -330,25 +350,38 @@ export async function importStudentsFromExcel(
   }
 
   const adminClient = createAdminClient();
+
+  // Lấy thông tin lớp học và số học sinh hiện tại
+  const { data: cls } = await adminClient.from("classes").select("name").eq("id", classId).single();
+  const className = cls?.name || "12A1";
+
+  const { count: currentStudentCount } = await adminClient
+    .from("class_members")
+    .select("*", { count: "exact", head: true })
+    .eq("class_id", classId);
+
+  let runningIndex = (currentStudentCount || 0) + 1;
   let successCount = 0;
   const errors: string[] = [];
 
   for (const st of studentsList) {
-    const code = st.studentCode?.trim().toUpperCase();
     const name = st.fullName?.trim();
+    if (!name) continue;
+
+    // Nếu trong Excel không có Mã HS hoặc trống -> Tự động sinh theo quy tắc [Tên lớp] + [Số thứ tự 2 số] (VD: 12A101, 12A102)
+    let code = st.studentCode?.trim().toUpperCase();
+    if (!code) {
+      code = generateStudentCode(className, runningIndex);
+      runningIndex++;
+    }
+
     const phone = st.phone?.trim() || "";
     const contactEmail = st.contactEmail?.trim() || "";
     const password = st.password?.trim() || "123456";
-
-    if (!code || !name) {
-      errors.push(`Dòng thiếu Tên hoặc Mã học sinh: "${name || 'Chưa có tên'}"`);
-      continue;
-    }
+    const internalEmail = `${code.toLowerCase()}@chemclass.local`;
 
     try {
-      const internalEmail = `${code.toLowerCase()}@chemclass.local`;
-
-      // Kiểm tra học sinh đã tồn tại chưa
+      // 1. Kiểm tra học sinh đã tồn tại chưa
       const { data: existing } = await adminClient
         .from("profiles")
         .select("id")
@@ -358,7 +391,7 @@ export async function importStudentsFromExcel(
       let studentUserId = existing?.id;
 
       if (!studentUserId) {
-        // Tạo Auth user
+        // 2. Tạo Auth user
         const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
           email: internalEmail,
           password: password,
@@ -373,24 +406,42 @@ export async function importStudentsFromExcel(
 
         studentUserId = authUser.user.id;
 
-        // Lưu profile
-        await adminClient.from("profiles").upsert({
+        // 3. Lưu profile cơ bản
+        const { error: profErr } = await adminClient.from("profiles").upsert({
           id: studentUserId,
           email: internalEmail,
           full_name: name,
           role: "student",
           student_code: code,
           phone: phone || null,
-          contact_email: contactEmail || null,
-          must_change_password: true,
         });
+
+        if (profErr) {
+          errors.push(`Lỗi lưu hồ sơ cho ${code}: ${profErr.message}`);
+          continue;
+        }
+
+        // Cập nhật trường mở rộng
+        try {
+          await adminClient.from("profiles").update({
+            contact_email: contactEmail || null,
+            must_change_password: true,
+          }).eq("id", studentUserId);
+        } catch {
+          // Bỏ qua nếu cột chưa tồn tại
+        }
       }
 
-      // Gắn vào lớp
-      await adminClient.from("class_members").upsert(
+      // 4. Gắn vào lớp
+      const { error: memberErr } = await adminClient.from("class_members").upsert(
         { class_id: classId, student_id: studentUserId, status: "active" },
         { onConflict: "class_id,student_id" }
       );
+
+      if (memberErr) {
+        errors.push(`Lỗi gán ${code} vào lớp: ${memberErr.message}`);
+        continue;
+      }
 
       successCount++;
     } catch (err: any) {
@@ -399,6 +450,11 @@ export async function importStudentsFromExcel(
   }
 
   revalidatePath(`/dashboard/classes/${classId}`);
+
+  if (successCount === 0 && errors.length > 0) {
+    return { error: errors.join(" | ") };
+  }
+
   return { success: true, count: successCount, errors };
 }
 

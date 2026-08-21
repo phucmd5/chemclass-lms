@@ -14,6 +14,7 @@ import {
   importStudentsFromExcel,
 } from "@/app/actions/classes";
 import { createSchedule, deleteSchedule } from "@/app/actions/schedules";
+import { generateStudentCode } from "@/lib/utils";
 import {
   Users,
   Calendar,
@@ -157,7 +158,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  // Xử lý đọc file Excel tải lên
+  // Xử lý đọc file Excel thông minh
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -174,35 +175,58 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         const rawData: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
         if (rawData.length < 2) {
-          setExcelError("File Excel không có dữ liệu học sinh!");
+          setExcelError("File Excel không có dữ liệu học sinh (cần ít nhất 1 dòng tiêu đề và 1 dòng học sinh)!");
           return;
         }
 
-        // Bỏ qua dòng tiêu đề đầu tiên, map các cột
+        const className = clsData?.name || "12A1";
+        const currentCount = clsData?.students?.length || 0;
         const parsed: any[] = [];
+
+        // Kiểm tra dòng tiêu đề để xác định vị trí các cột
+        const headerRow = (rawData[0] || []).map((h: any) => String(h || "").toLowerCase());
+        let nameColIdx = headerRow.findIndex((h: string) => h.includes("tên") || h.includes("name") || h.includes("họ"));
+        let phoneColIdx = headerRow.findIndex((h: string) => h.includes("thoại") || h.includes("phone") || h.includes("sđt") || h.includes("sdt") || h.includes("zalo"));
+        let emailColIdx = headerRow.findIndex((h: string) => h.includes("mail"));
+        let codeColIdx = headerRow.findIndex((h: string) => h.includes("mã") || h.includes("code") || h.includes("tài khoản"));
+        let passColIdx = headerRow.findIndex((h: string) => h.includes("khẩu") || h.includes("pass"));
+
+        // Nếu không khớp theo tên cột, gán mặc định theo vị trí thông dụng
+        if (nameColIdx === -1) nameColIdx = codeColIdx === 0 ? 1 : 0;
+        if (phoneColIdx === -1) phoneColIdx = 2;
+        if (emailColIdx === -1) emailColIdx = 3;
+
+        let autoIndex = currentCount + 1;
+
         for (let i = 1; i < rawData.length; i++) {
           const row = rawData[i];
           if (!row || row.length === 0) continue;
 
-          const studentCode = String(row[0] || "").trim();
-          const fullName = String(row[1] || "").trim();
-          const phone = String(row[2] || "").trim();
-          const contactEmail = String(row[3] || "").trim();
-          const password = String(row[4] || "123456").trim();
+          const fullName = String(row[nameColIdx] || row[0] || "").trim();
+          if (!fullName) continue;
 
-          if (studentCode && fullName) {
-            parsed.push({
-              studentCode,
-              fullName,
-              phone,
-              contactEmail,
-              password,
-            });
+          let studentCode = codeColIdx !== -1 ? String(row[codeColIdx] || "").trim() : "";
+          // Nếu không có mã HS hoặc để trống -> Tự động tạo dạng 12A101, 12A102...
+          if (!studentCode) {
+            studentCode = generateStudentCode(className, autoIndex);
+            autoIndex++;
           }
+
+          const phone = phoneColIdx !== -1 ? String(row[phoneColIdx] || "").trim() : "";
+          const contactEmail = emailColIdx !== -1 ? String(row[emailColIdx] || "").trim() : "";
+          const password = passColIdx !== -1 ? String(row[passColIdx] || "123456").trim() : "123456";
+
+          parsed.push({
+            studentCode,
+            fullName,
+            phone,
+            contactEmail,
+            password: password || "123456",
+          });
         }
 
         if (parsed.length === 0) {
-          setExcelError("Không tìm thấy dòng học sinh hợp lệ (cần ít nhất Cột 1: Mã HS, Cột 2: Họ tên)!");
+          setExcelError("Không tìm thấy thông tin học sinh hợp lệ trong file Excel!");
         } else {
           setExcelStudents(parsed);
         }
@@ -214,19 +238,27 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     reader.readAsBinaryString(file);
   }
 
-  // Tải file mẫu Excel
+  // Tải file mẫu Excel chuẩn
   function downloadTemplateExcel() {
+    const className = clsData?.name || "12A1";
+    const sampleCode1 = generateStudentCode(className, 1);
+    const sampleCode2 = generateStudentCode(className, 2);
+    const sampleCode3 = generateStudentCode(className, 3);
+
     const templateData = [
-      ["Mã Học Sinh (*)", "Họ và Tên (*)", "Số điện thoại / Zalo", "Email liên hệ (Tùy chọn)", "Mật khẩu ban đầu (Tùy chọn)"],
-      ["HS01", "Nguyễn Văn An", "0912345678", "nguyenan@gmail.com", "123456"],
-      ["HS02", "Trần Thị Bình", "0987654321", "binhtran@gmail.com", "123456"],
-      ["HS03", "Lê Hoàng Cường", "0905123456", "", "123456"],
+      ["Họ và Tên (*)", "Số điện thoại / Zalo", "Email liên hệ (Tùy chọn)", `Mã Học Sinh (Để trống để tự tạo dạng ${sampleCode1})`, "Mật khẩu ban đầu (Mặc định 123456)"],
+      ["Nguyễn Văn An", "0912345678", "nguyenan@gmail.com", sampleCode1, "123456"],
+      ["Trần Thị Bình", "0987654321", "binhtran@gmail.com", sampleCode2, "123456"],
+      ["Lê Hoàng Cường", "0905123456", "", sampleCode3, "123456"],
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(templateData);
+    // Set column widths for better view
+    ws["!cols"] = [{ wch: 25 }, { wch: 20 }, { wch: 28 }, { wch: 35 }, { wch: 30 }];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "DanhSachHocSinh");
-    XLSX.writeFile(wb, `Mau_Danh_Sach_Hoc_Sinh_${clsData?.name || "Lop"}.xlsx`);
+    XLSX.writeFile(wb, `Mau_Danh_Sach_Hoc_Sinh_${className}.xlsx`);
   }
 
   // Xác nhận nhập danh sách Excel
@@ -302,7 +334,8 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  const nextStudentCode = `HS${String(clsData.students.length + 1).padStart(2, "0")}`;
+  // Tự động sinh mã học sinh dạng: [Tên Lớp] + [Số thứ tự 2 số] (VD: 12A101)
+  const nextStudentCode = generateStudentCode(clsData.name, clsData.students.length + 1);
 
   return (
     <div className="space-y-6">
@@ -403,11 +436,15 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <p className="text-xs text-slate-400">
-              💡 Học sinh đăng nhập bằng <strong>Mã Học Sinh</strong> và sẽ <strong>bắt buộc đổi mật khẩu</strong> ở lần đầu.
+              💡 Tài khoản học sinh có định dạng: <strong className="text-cyan-300 font-mono">[TênLớp][STT]</strong> (Ví dụ: <span className="font-mono text-indigo-300 font-bold">{nextStudentCode}</span>).
             </p>
             <div className="flex items-center gap-2 flex-wrap">
               <button
-                onClick={() => setShowExcelModal(true)}
+                onClick={() => {
+                  setShowExcelModal(true);
+                  setExcelStudents([]);
+                  setExcelError(null);
+                }}
                 className="px-3.5 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all"
               >
                 <FileSpreadsheet className="w-4 h-4" />
@@ -449,7 +486,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 <table className="w-full text-left text-xs text-slate-300">
                   <thead className="bg-slate-950/80 uppercase text-[11px] font-semibold text-slate-400 border-b border-white/10">
                     <tr>
-                      <th className="px-4 py-3.5">Mã HS</th>
+                      <th className="px-4 py-3.5">Mã HS (Tài khoản)</th>
                       <th className="px-4 py-3.5">Họ và Tên</th>
                       <th className="px-4 py-3.5">SĐT / Zalo</th>
                       <th className="px-4 py-3.5">Email Thông Báo</th>
@@ -732,7 +769,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 Thêm Học Sinh Mới
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Tự động tạo tài khoản đăng nhập cho học sinh (Phương án A)
+                Tài khoản tự động sinh theo tên lớp: <span className="font-mono text-cyan-300 font-bold">{nextStudentCode}</span>
               </p>
             </div>
 
@@ -760,14 +797,14 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                    Mã Học Sinh *
+                    Mã HS (Tài khoản) *
                   </label>
                   <input
                     type="text"
                     name="studentCode"
                     required
                     defaultValue={nextStudentCode}
-                    placeholder="HS01"
+                    placeholder="12A101"
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-cyan-300 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm uppercase"
                   />
                 </div>
@@ -854,16 +891,16 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                 Nhập Danh Sách Học Sinh Từ File Excel
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Tự động tạo tài khoản hàng loạt cho tất cả học sinh trong file
+                Tự động tạo tài khoản dạng <strong className="text-cyan-300 font-mono">{nextStudentCode}</strong> cho cả lớp
               </p>
             </div>
 
             {/* Template Download Banner */}
             <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="space-y-1">
-                <p className="text-xs font-bold text-emerald-300">Chưa có file mẫu chuẩn?</p>
+                <p className="text-xs font-bold text-emerald-300">Tải File Excel Mẫu Chuẩn ({clsData.name})</p>
                 <p className="text-[11px] text-slate-300">
-                  Tải file Excel mẫu có sẵn cột: Mã HS, Họ tên, SĐT, Email và Mật khẩu.
+                  File mẫu có sẵn cột: Họ tên, SĐT, Email và Mã HS tự động.
                 </p>
               </div>
               <button
@@ -876,8 +913,8 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
             </div>
 
             {excelError && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2 leading-relaxed">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>{excelError}</span>
               </div>
             )}
@@ -903,7 +940,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                   Bấm vào đây để chọn file Excel (.xlsx, .xls, .csv)
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Hoặc kéo thả file Excel danh sách học sinh vào khung này
+                  Hệ thống tự động đọc danh sách và gán mã học sinh
                 </p>
               </div>
             </div>
@@ -924,7 +961,7 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                   <table className="w-full text-left text-[11px] text-slate-300">
                     <thead className="bg-slate-900 sticky top-0 border-b border-white/10 text-slate-400 font-semibold">
                       <tr>
-                        <th className="px-3 py-2">Mã HS</th>
+                        <th className="px-3 py-2">Mã HS (Tài khoản)</th>
                         <th className="px-3 py-2">Họ và Tên</th>
                         <th className="px-3 py-2">SĐT</th>
                         <th className="px-3 py-2">Email</th>
