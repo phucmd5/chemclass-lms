@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { getStudentDashboardData } from "@/app/actions/schedules";
 import { logoutUser } from "@/app/actions/auth";

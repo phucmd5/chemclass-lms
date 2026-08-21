@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { getCurrentProfile, logoutUser } from "@/app/actions/auth";
 import { redirect } from "next/navigation";

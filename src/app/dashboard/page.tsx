@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { getTeacherClasses } from "@/app/actions/classes";
 import { getTeacherSchedules } from "@/app/actions/schedules";
