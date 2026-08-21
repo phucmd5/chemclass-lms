@@ -159,19 +159,15 @@ export async function loginUser(formData: FormData): Promise<AuthState> {
     return { error: `Đăng nhập không thành công: ${signInErr?.message || "Lỗi không xác định"}` };
   }
 
-  // Lấy role & cờ đổi mật khẩu của user để xác định trang điều hướng
-  const { data: profile } = await adminClient
-    .from("profiles")
-    .select("role, must_change_password")
-    .eq("id", signInData.user.id)
-    .single();
-
-  const role = profile?.role || "teacher";
+  // Lấy role & cờ đổi mật khẩu từ user_metadata để quyết định điều hướng
+  const userMetadata = signInData.user.user_metadata || {};
+  const role = userMetadata.role || "student";
   let redirectUrl = "/dashboard";
 
   if (role === "student") {
-    // Nếu học sinh đăng nhập lần đầu (chưa đổi mật khẩu) -> LẬP TỨC chuyển đến màn hình đổi mật khẩu
-    if (profile?.must_change_password !== false) {
+    // Nếu học sinh chưa đổi mật khẩu (must_change_password !== false) -> Chuyển thẳng tới trang đổi mật khẩu
+    const mustChange = userMetadata.must_change_password !== false;
+    if (mustChange) {
       redirectUrl = "/student/change-password";
     } else {
       redirectUrl = "/student";

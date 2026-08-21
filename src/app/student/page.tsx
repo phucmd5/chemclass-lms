@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { getStudentDashboardData } from "@/app/actions/schedules";
 import { logoutUser } from "@/app/actions/auth";
+import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import {
   FlaskConical,
@@ -28,8 +29,11 @@ export default async function StudentPortalPage() {
 
   const { profile, classes, upcomingSchedules } = data;
 
-  // Nếu học sinh đăng nhập lần đầu và chưa đổi mật khẩu -> Chuyển hướng bắt buộc đổi mật khẩu
-  if (profile.must_change_password) {
+  // Kiểm tra cờ must_change_password trong user_metadata
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (user?.user_metadata?.must_change_password !== false) {
     redirect("/student/change-password");
   }
 

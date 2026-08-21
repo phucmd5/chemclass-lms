@@ -14,23 +14,25 @@ export interface PasswordChangeResult {
 export async function getStudentPasswordStatus() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { isFirstTime: true };
+  if (!user) return { isFirstTime: true, profile: null };
 
   const adminClient = createAdminClient();
   const { data: profile } = await adminClient
     .from("profiles")
-    .select("must_change_password, full_name, student_code")
+    .select("full_name, student_code")
     .eq("id", user.id)
     .single();
 
+  const isFirstTime = user.user_metadata?.must_change_password !== false;
+
   return {
-    isFirstTime: profile?.must_change_password ?? false,
+    isFirstTime,
     profile,
   };
 }
 
 /**
- * Đổi mật khẩu lần đầu cho Học sinh (Bắt buộc - Không cần mật khẩu cũ vì vừa đăng nhập bằng 123456)
+ * Đổi mật khẩu lần đầu cho Học sinh (Bắt buộc)
  */
 export async function changeStudentPasswordFirstTime(formData: FormData): Promise<PasswordChangeResult> {
   const newPassword = (formData.get("newPassword") as string)?.trim();
@@ -59,25 +61,24 @@ export async function changeStudentPasswordFirstTime(formData: FormData): Promis
     return { error: "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn!" };
   }
 
-  // 1. Cập nhật mật khẩu mới trong Supabase Auth
-  const { error: updateAuthErr } = await supabase.auth.updateUser({
+  const adminClient = createAdminClient();
+
+  // 1. Cập nhật mật khẩu mới trong Supabase Auth và set must_change_password = false
+  const existingMeta = user.user_metadata || {};
+  const { error: updateAuthErr } = await adminClient.auth.admin.updateUserById(user.id, {
     password: newPassword,
+    user_metadata: {
+      ...existingMeta,
+      must_change_password: false,
+    },
   });
 
   if (updateAuthErr) {
     return { error: `Lỗi cập nhật mật khẩu: ${updateAuthErr.message}` };
   }
 
-  // 2. Tắt cờ must_change_password = false
-  const adminClient = createAdminClient();
-  try {
-    await adminClient
-      .from("profiles")
-      .update({ must_change_password: false })
-      .eq("id", user.id);
-  } catch (err) {
-    console.warn("Lỗi tắt cờ must_change_password:", err);
-  }
+  // 2. Cập nhật phiên client
+  await supabase.auth.updateUser({ password: newPassword });
 
   return { success: true };
 }
@@ -124,22 +125,22 @@ export async function changeStudentPasswordVoluntary(formData: FormData): Promis
   }
 
   // 2. Cập nhật sang mật khẩu mới
-  const { error: updateErr } = await supabase.auth.updateUser({
+  const adminClient = createAdminClient();
+  const existingMeta = user.user_metadata || {};
+
+  const { error: updateErr } = await adminClient.auth.admin.updateUserById(user.id, {
     password: newPassword,
+    user_metadata: {
+      ...existingMeta,
+      must_change_password: false,
+    },
   });
 
   if (updateErr) {
     return { error: `Lỗi đổi mật khẩu: ${updateErr.message}` };
   }
 
-  // 3. Đảm bảo cờ must_change_password là false
-  const adminClient = createAdminClient();
-  try {
-    await adminClient
-      .from("profiles")
-      .update({ must_change_password: false })
-      .eq("id", user.id);
-  } catch {}
+  await supabase.auth.updateUser({ password: newPassword });
 
   return { success: true };
 }

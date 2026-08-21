@@ -148,7 +148,7 @@ export async function deleteClass(classId: string) {
 }
 
 /**
- * Lấy chi tiết một lớp học (Thông tin lớp, Danh sách học sinh, Thời khóa biểu)
+ * Lấy chi tiết một lớp học (Thông tin lớp, Danh sách học sinh kèm trạng thái đổi mật khẩu, Thời khóa biểu)
  */
 export async function getClassDetails(classId: string) {
   const supabase = await createClient();
@@ -180,6 +180,15 @@ export async function getClassDetails(classId: string) {
     .eq("class_id", classId)
     .order("joined_at", { ascending: true });
 
+  // Lấy trạng thái user_metadata từ Auth để lấy chính xác must_change_password
+  const { data: authUsers } = await adminClient.auth.admin.listUsers();
+  const userMap = new Map<string, any>();
+  if (authUsers?.users) {
+    for (const u of authUsers.users) {
+      userMap.set(u.id, u);
+    }
+  }
+
   // Lấy lịch học của lớp
   const { data: schedules } = await supabase
     .from("schedules")
@@ -189,12 +198,22 @@ export async function getClassDetails(classId: string) {
 
   return {
     ...cls,
-    students: (members || []).map((m) => ({
-      membershipId: m.id,
-      status: m.status,
-      joinedAt: m.joined_at,
-      profile: Array.isArray(m.profiles) ? m.profiles[0] : m.profiles,
-    })),
+    students: (members || []).map((m) => {
+      const prof = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+      const authUser = prof?.id ? userMap.get(prof.id) : null;
+      // Nếu must_change_password chưa được đổi (hoặc = true) -> true, ngược lại false
+      const mustChange = authUser?.user_metadata?.must_change_password !== false;
+
+      return {
+        membershipId: m.id,
+        status: m.status,
+        joinedAt: m.joined_at,
+        profile: {
+          ...prof,
+          must_change_password: mustChange,
+        },
+      };
+    }),
     schedules: schedules || [],
   };
 }
@@ -239,7 +258,7 @@ export async function addStudentToClass(formData: FormData) {
   let studentUserId = existingProfile?.id;
 
   if (!studentUserId) {
-    // 2. Tạo tài khoản trong Supabase Auth
+    // 2. Tạo tài khoản trong Supabase Auth với cờ must_change_password = true
     const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
       email: internalEmail,
       password: password,
@@ -248,6 +267,7 @@ export async function addStudentToClass(formData: FormData) {
         full_name: fullName,
         role: "student",
         student_code: studentCode,
+        must_change_password: true,
       },
     });
 
@@ -270,16 +290,6 @@ export async function addStudentToClass(formData: FormData) {
     const { error: profErr } = await adminClient.from("profiles").upsert(profilePayload);
     if (profErr) {
       return { error: `Lỗi lưu hồ sơ học sinh: ${profErr.message}` };
-    }
-
-    // Cập nhật thêm các trường mở rộng nếu có
-    try {
-      await adminClient.from("profiles").update({
-        contact_email: contactEmail || null,
-        must_change_password: true,
-      }).eq("id", studentUserId);
-    } catch {
-      // Bỏ qua nếu chưa chạy SQL tạo cột
     }
   }
 
@@ -309,23 +319,20 @@ export async function resetStudentPassword(studentId: string, classId: string, d
 
   const adminClient = createAdminClient();
 
-  // 1. Cập nhật mật khẩu trong Supabase Auth thành mật khẩu mặc định
+  // 1. Cập nhật mật khẩu trong Supabase Auth thành mật khẩu mặc định + Bật cờ must_change_password = true
+  const { data: userData } = await adminClient.auth.admin.getUserById(studentId);
+  const existingMeta = userData?.user?.user_metadata || {};
+
   const { error: authErr } = await adminClient.auth.admin.updateUserById(studentId, {
     password: defaultPassword,
+    user_metadata: {
+      ...existingMeta,
+      must_change_password: true,
+    },
   });
 
   if (authErr) {
     return { error: `Lỗi reset mật khẩu: ${authErr.message}` };
-  }
-
-  // 2. Bật lại cờ must_change_password = true
-  try {
-    await adminClient
-      .from("profiles")
-      .update({ must_change_password: true })
-      .eq("id", studentId);
-  } catch {
-    // Bỏ qua nếu cột chưa tồn tại
   }
 
   revalidatePath(`/dashboard/classes/${classId}`);
@@ -368,7 +375,7 @@ export async function importStudentsFromExcel(
     const name = st.fullName?.trim();
     if (!name) continue;
 
-    // Nếu trong Excel không có Mã HS hoặc trống -> Tự động sinh theo quy tắc [Tên lớp] + [Số thứ tự 2 số] (VD: 12A101, 12A102)
+    // Tự động sinh theo quy tắc [Tên lớp] + [Số thứ tự 2 số] (VD: 12A101, 12A102) nếu thiếu
     let code = st.studentCode?.trim().toUpperCase();
     if (!code) {
       code = generateStudentCode(className, runningIndex);
@@ -376,7 +383,6 @@ export async function importStudentsFromExcel(
     }
 
     const phone = st.phone?.trim() || "";
-    const contactEmail = st.contactEmail?.trim() || "";
     const password = st.password?.trim() || "123456";
     const internalEmail = `${code.toLowerCase()}@chemclass.local`;
 
@@ -391,12 +397,17 @@ export async function importStudentsFromExcel(
       let studentUserId = existing?.id;
 
       if (!studentUserId) {
-        // 2. Tạo Auth user
+        // 2. Tạo Auth user với cờ must_change_password = true
         const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
           email: internalEmail,
           password: password,
           email_confirm: true,
-          user_metadata: { full_name: name, role: "student", student_code: code },
+          user_metadata: {
+            full_name: name,
+            role: "student",
+            student_code: code,
+            must_change_password: true,
+          },
         });
 
         if (authErr) {
@@ -419,16 +430,6 @@ export async function importStudentsFromExcel(
         if (profErr) {
           errors.push(`Lỗi lưu hồ sơ cho ${code}: ${profErr.message}`);
           continue;
-        }
-
-        // Cập nhật trường mở rộng
-        try {
-          await adminClient.from("profiles").update({
-            contact_email: contactEmail || null,
-            must_change_password: true,
-          }).eq("id", studentUserId);
-        } catch {
-          // Bỏ qua nếu cột chưa tồn tại
         }
       }
 
