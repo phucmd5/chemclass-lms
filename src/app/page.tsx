@@ -8,7 +8,8 @@ import {
   ShieldCheck, 
   Video, 
   ArrowRight,
-  CheckCircle2
+  CheckCircle2,
+  UserPlus
 } from "lucide-react";
 import { MathText } from "@/components/KatexFormula";
 
@@ -18,7 +19,7 @@ export default function HomePage() {
       {/* Header / Nav */}
       <header className="border-b border-white/10 backdrop-blur-md sticky top-0 z-50 bg-slate-950/60">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-indigo-500/30">
               <FlaskConical className="w-5 h-5 text-white" />
             </div>
@@ -30,7 +31,7 @@ export default function HomePage() {
                 Serverless v1.0
               </span>
             </div>
-          </div>
+          </Link>
 
           <div className="flex items-center gap-3">
             <Link
@@ -40,11 +41,11 @@ export default function HomePage() {
               Đăng nhập
             </Link>
             <Link
-              href="/dashboard"
+              href="/register"
               className="px-4 py-2 text-sm font-medium rounded-lg bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white shadow-lg shadow-indigo-500/25 transition-all flex items-center gap-1.5"
             >
-              Vào hệ thống
-              <ArrowRight className="w-4 h-4" />
+              <UserPlus className="w-4 h-4" />
+              <span>Đăng ký Giáo viên</span>
             </Link>
           </div>
         </div>
@@ -73,18 +74,18 @@ export default function HomePage() {
           {/* Quick CTA Actions */}
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
             <Link
-              href="/dashboard"
+              href="/register"
               className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 transition-all group"
             >
               <GraduationCap className="w-5 h-5" />
-              <span>Giao diện Giáo viên</span>
+              <span>1. Đăng ký Tài khoản Giáo viên (Bắt đầu tại đây)</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>
             <Link
-              href="/student"
+              href="/login"
               className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 border border-slate-700 text-slate-200 font-semibold flex items-center justify-center gap-2 transition-all"
             >
-              <span>Giao diện Học sinh</span>
+              <span>2. Đăng nhập (GV / Học sinh)</span>
             </Link>
           </div>
         </div>
