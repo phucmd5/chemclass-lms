@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { getTeacherClasses, createClass, deleteClass, updateClass } from "@/app/actions/classes";
+import { GRADE_OPTIONS } from "@/lib/constants";
 import {
   Users,
   Plus,
@@ -98,10 +99,10 @@ export default function ClassesPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Users className="w-6 h-6 text-indigo-400" />
-            Quản Lý Lớp Học & Học Sinh
+            Quản Lý Lớp Học THCS & Học Sinh
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Tạo lớp mới, chỉnh sửa thông tin, xóa lớp và quản lý danh sách học sinh
+            Tạo lớp học Khối 6, 7, 8, 9 (Cấp THCS), chỉnh sửa và quản lý danh sách học sinh
           </p>
         </div>
 
@@ -127,7 +128,7 @@ export default function ClassesPage() {
           </div>
           <h3 className="text-lg font-bold text-white">Chưa có lớp học nào</h3>
           <p className="text-sm text-slate-400">
-            Hãy tạo lớp học đầu tiên của bạn (ví dụ: Hoá 12 - Luyện Thi THPT QG) để bắt đầu thêm học sinh.
+            Hãy tạo lớp học đầu tiên của bạn (ví dụ: KHTN 8A1, Hoá 9 - Luyện Thi Chuyên) để bắt đầu thêm học sinh.
           </p>
           <button
             onClick={() => setShowModal(true)}
@@ -244,10 +245,10 @@ export default function ClassesPage() {
             <div>
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-indigo-400" />
-                Tạo Lớp Học Mới
+                Tạo Lớp Học THCS Mới
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Điền thông tin lớp để lên lịch và quản lý học sinh
+                Điền thông tin lớp để lên lịch và quản lý học sinh cấp 2 (Khối 6-9)
               </p>
             </div>
 
@@ -266,7 +267,7 @@ export default function ClassesPage() {
                   type="text"
                   name="name"
                   required
-                  placeholder="Ví dụ: Hoá 12 - Luyện Thi Đại Học VIP"
+                  placeholder="Ví dụ: KHTN 8A1 hoặc Hoá 9 - Luyện Thi Chuyên"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                 />
               </div>
@@ -274,18 +275,19 @@ export default function ClassesPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                    Khối Lớp *
+                    Khối Lớp THCS *
                   </label>
                   <select
                     name="grade"
                     required
-                    defaultValue="12"
+                    defaultValue="8"
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   >
-                    <option value="10">Khối 10</option>
-                    <option value="11">Khối 11</option>
-                    <option value="12">Khối 12</option>
-                    <option value="Khác">Luyện thi ĐH / Khác</option>
+                    {GRADE_OPTIONS.map((g) => (
+                      <option key={g.value} value={g.value}>
+                        {g.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -323,7 +325,7 @@ export default function ClassesPage() {
                 <textarea
                   name="description"
                   rows={2}
-                  placeholder="Mục tiêu điểm số, thời gian học dự kiến..."
+                  placeholder="Mục tiêu bồi dưỡng, lịch học dự kiến..."
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                 />
               </div>
@@ -392,7 +394,7 @@ export default function ClassesPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                    Khối Lớp *
+                    Khối Lớp THCS *
                   </label>
                   <select
                     name="grade"
@@ -400,10 +402,11 @@ export default function ClassesPage() {
                     defaultValue={editingClass.grade}
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   >
-                    <option value="10">Khối 10</option>
-                    <option value="11">Khối 11</option>
-                    <option value="12">Khối 12</option>
-                    <option value="Khác">Luyện thi ĐH / Khác</option>
+                    {GRADE_OPTIONS.map((g) => (
+                      <option key={g.value} value={g.value}>
+                        {g.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

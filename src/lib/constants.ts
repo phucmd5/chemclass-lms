@@ -1,4 +1,15 @@
 /**
+ * Định nghĩa các khối học cấp Trung học cơ sở (THCS: Khối 6 -> Khối 9)
+ */
+export const GRADE_OPTIONS = [
+  { value: "6", label: "Khối 6 (KHTN 6)" },
+  { value: "7", label: "Khối 7 (KHTN 7)" },
+  { value: "8", label: "Khối 8 (KHTN 8 / Hoá 8)" },
+  { value: "9", label: "Khối 9 (KHTN 9 / Hoá 9)" },
+  { value: "Khác", label: "Bồi dưỡng HSG THCS / Khác" },
+];
+
+/**
  * Định nghĩa khung giờ các tiết học chuẩn ChemClass LMS
  * - Buổi sáng: Tiết 1 -> Tiết 5
  * - Buổi chiều: 13h30 -> 16h30 (không chia tiết)

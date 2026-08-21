@@ -418,7 +418,7 @@ export default function SchedulesPage() {
 
                               <div className="flex items-center gap-1 text-[10px] text-slate-400">
                                 <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold text-[9px]">
-                                  Khối {item.classes?.grade || "12"}
+                                  Khối {item.classes?.grade || "8"}
                                 </span>
                               </div>
 
@@ -511,7 +511,7 @@ export default function SchedulesPage() {
 
                               <div className="flex items-center gap-1 text-[10px] text-slate-400">
                                 <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-semibold text-[9px]">
-                                  Khối {item.classes?.grade || "12"}
+                                  Khối {item.classes?.grade || "8"}
                                 </span>
                               </div>
 

@@ -15,6 +15,7 @@ import {
 } from "@/app/actions/classes";
 import { createSchedule, deleteSchedule } from "@/app/actions/schedules";
 import { generateStudentCode } from "@/lib/utils";
+import { GRADE_OPTIONS } from "@/lib/constants";
 import {
   Users,
   Calendar,
@@ -695,10 +696,11 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
                     defaultValue={clsData.grade}
                     className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   >
-                    <option value="10">Khối 10</option>
-                    <option value="11">Khối 11</option>
-                    <option value="12">Khối 12</option>
-                    <option value="Khác">Luyện thi ĐH / Khác</option>
+                    {GRADE_OPTIONS.map((g) => (
+                      <option key={g.value} value={g.value}>
+                        {g.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
