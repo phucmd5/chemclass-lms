@@ -302,9 +302,13 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
 
   async function handleRemoveStudent(membershipId: string, name: string) {
     if (!confirm(`Bạn có chắc chắn muốn xoá học sinh ${name} khỏi lớp này?`)) return;
-    await removeStudentFromClass(membershipId, classId);
-    showToast("Đã xóa học sinh khỏi lớp.");
-    loadData();
+    const res = await removeStudentFromClass(membershipId, classId);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      showToast(`Đã xóa học sinh ${name} khỏi lớp.`);
+      loadData();
+    }
   }
 
   async function handleDeleteSchedule(scheduleId: string) {

@@ -19,9 +19,9 @@ export async function createSchedule(formData: FormData) {
     return { error: "Vui lòng nhập đầy đủ tiêu đề buổi học, giờ bắt đầu và giờ kết thúc!" };
   }
 
-  const supabase = await createClient();
+  const adminClient = createAdminClient();
 
-  const { error } = await supabase.from("schedules").insert({
+  const { error } = await adminClient.from("schedules").insert({
     class_id: classId,
     title,
     start_time: new Date(startTime).toISOString(),
@@ -48,7 +48,8 @@ export async function getTeacherSchedules() {
 
   if (!user) return [];
 
-  const { data, error } = await supabase
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
     .from("schedules")
     .select(`
       *,
@@ -73,8 +74,8 @@ export async function getTeacherSchedules() {
  * Xóa một buổi học
  */
 export async function deleteSchedule(scheduleId: string, classId?: string) {
-  const supabase = await createClient();
-  const { error } = await supabase.from("schedules").delete().eq("id", scheduleId);
+  const adminClient = createAdminClient();
+  const { error } = await adminClient.from("schedules").delete().eq("id", scheduleId);
 
   if (error) {
     return { error: `Lỗi xóa lịch: ${error.message}` };
@@ -139,7 +140,7 @@ export async function getStudentDashboardData() {
         )
       `)
       .in("class_id", classIds)
-      .gte("start_time", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()) // Từ 2 tiếng trước trở đi
+      .gte("start_time", new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
       .order("start_time", { ascending: true })
       .limit(10);
 

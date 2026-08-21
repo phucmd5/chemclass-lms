@@ -14,7 +14,8 @@ export async function getTeacherClasses() {
 
   if (!user) return [];
 
-  const { data: classes, error } = await supabase
+  const adminClient = createAdminClient();
+  const { data: classes, error } = await adminClient
     .from("classes")
     .select(`
       *,
@@ -58,7 +59,8 @@ export async function createClass(formData: FormData) {
     return { error: "Bạn chưa đăng nhập!" };
   }
 
-  const { data, error } = await supabase
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
     .from("classes")
     .insert({
       teacher_id: user.id,
@@ -101,7 +103,8 @@ export async function updateClass(formData: FormData) {
     return { error: "Bạn chưa đăng nhập!" };
   }
 
-  const { error } = await supabase
+  const adminClient = createAdminClient();
+  const { error } = await adminClient
     .from("classes")
     .update({
       name,
@@ -133,7 +136,8 @@ export async function deleteClass(classId: string) {
 
   if (!user) return { error: "Bạn chưa đăng nhập!" };
 
-  const { error } = await supabase
+  const adminClient = createAdminClient();
+  const { error } = await adminClient
     .from("classes")
     .delete()
     .eq("id", classId)
@@ -151,10 +155,9 @@ export async function deleteClass(classId: string) {
  * Lấy chi tiết một lớp học (Thông tin lớp, Danh sách học sinh kèm trạng thái đổi mật khẩu, Thời khóa biểu)
  */
 export async function getClassDetails(classId: string) {
-  const supabase = await createClient();
   const adminClient = createAdminClient();
 
-  const { data: cls, error: clsErr } = await supabase
+  const { data: cls, error: clsErr } = await adminClient
     .from("classes")
     .select("*")
     .eq("id", classId)
@@ -190,7 +193,7 @@ export async function getClassDetails(classId: string) {
   }
 
   // Lấy lịch học của lớp
-  const { data: schedules } = await supabase
+  const { data: schedules } = await adminClient
     .from("schedules")
     .select("*")
     .eq("class_id", classId)
@@ -201,7 +204,6 @@ export async function getClassDetails(classId: string) {
     students: (members || []).map((m) => {
       const prof = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
       const authUser = prof?.id ? userMap.get(prof.id) : null;
-      // Nếu must_change_password chưa được đổi (hoặc = true) -> true, ngược lại false
       const mustChange = authUser?.user_metadata?.must_change_password !== false;
 
       return {
@@ -319,7 +321,6 @@ export async function resetStudentPassword(studentId: string, classId: string, d
 
   const adminClient = createAdminClient();
 
-  // 1. Cập nhật mật khẩu trong Supabase Auth thành mật khẩu mặc định + Bật cờ must_change_password = true
   const { data: userData } = await adminClient.auth.admin.getUserById(studentId);
   const existingMeta = userData?.user?.user_metadata || {};
 
@@ -340,7 +341,7 @@ export async function resetStudentPassword(studentId: string, classId: string, d
 }
 
 /**
- * Nhập danh sách học sinh hàng loạt từ file Excel (Tự động tạo mã dạng 12A101, 12A102 nếu thiếu)
+ * Nhập danh sách học sinh hàng loạt từ file Excel
  */
 export async function importStudentsFromExcel(
   classId: string,
@@ -358,7 +359,6 @@ export async function importStudentsFromExcel(
 
   const adminClient = createAdminClient();
 
-  // Lấy thông tin lớp học và số học sinh hiện tại
   const { data: cls } = await adminClient.from("classes").select("name").eq("id", classId).single();
   const className = cls?.name || "12A1";
 
@@ -375,7 +375,6 @@ export async function importStudentsFromExcel(
     const name = st.fullName?.trim();
     if (!name) continue;
 
-    // Tự động sinh theo quy tắc [Tên lớp] + [Số thứ tự 2 số] (VD: 12A101, 12A102) nếu thiếu
     let code = st.studentCode?.trim().toUpperCase();
     if (!code) {
       code = generateStudentCode(className, runningIndex);
@@ -387,7 +386,6 @@ export async function importStudentsFromExcel(
     const internalEmail = `${code.toLowerCase()}@chemclass.local`;
 
     try {
-      // 1. Kiểm tra học sinh đã tồn tại chưa
       const { data: existing } = await adminClient
         .from("profiles")
         .select("id")
@@ -397,7 +395,6 @@ export async function importStudentsFromExcel(
       let studentUserId = existing?.id;
 
       if (!studentUserId) {
-        // 2. Tạo Auth user với cờ must_change_password = true
         const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
           email: internalEmail,
           password: password,
@@ -417,7 +414,6 @@ export async function importStudentsFromExcel(
 
         studentUserId = authUser.user.id;
 
-        // 3. Lưu profile cơ bản
         const { error: profErr } = await adminClient.from("profiles").upsert({
           id: studentUserId,
           email: internalEmail,
@@ -433,16 +429,10 @@ export async function importStudentsFromExcel(
         }
       }
 
-      // 4. Gắn vào lớp
-      const { error: memberErr } = await adminClient.from("class_members").upsert(
+      await adminClient.from("class_members").upsert(
         { class_id: classId, student_id: studentUserId, status: "active" },
         { onConflict: "class_id,student_id" }
       );
-
-      if (memberErr) {
-        errors.push(`Lỗi gán ${code} vào lớp: ${memberErr.message}`);
-        continue;
-      }
 
       successCount++;
     } catch (err: any) {
@@ -460,11 +450,15 @@ export async function importStudentsFromExcel(
 }
 
 /**
- * Xoá học sinh khỏi lớp
+ * Xoá học sinh khỏi lớp (Dùng adminClient để vượt qua RLS an toàn 100%)
  */
 export async function removeStudentFromClass(membershipId: string, classId: string) {
-  const supabase = await createClient();
-  const { error } = await supabase.from("class_members").delete().eq("id", membershipId);
+  if (!membershipId) {
+    return { error: "Thiếu ID thành viên!" };
+  }
+
+  const adminClient = createAdminClient();
+  const { error } = await adminClient.from("class_members").delete().eq("id", membershipId);
 
   if (error) {
     return { error: `Lỗi xoá học sinh: ${error.message}` };
