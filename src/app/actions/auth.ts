@@ -7,10 +7,12 @@ import { redirect } from "next/navigation";
 export interface AuthState {
   error?: string;
   success?: boolean;
+  role?: string;
+  redirectUrl?: string;
 }
 
 /**
- * Đăng ký tài khoản Giáo viên (Tự động xác thực email + Báo lỗi nếu tài khoản đã tồn tại)
+ * Đăng ký tài khoản Giáo viên (Tự động kích hoạt + Đăng nhập ngay)
  */
 export async function registerTeacher(formData: FormData): Promise<AuthState> {
   const email = (formData.get("email") as string)?.trim().toLowerCase();
@@ -29,7 +31,7 @@ export async function registerTeacher(formData: FormData): Promise<AuthState> {
   const supabase = await createClient();
   const adminClient = createAdminClient();
 
-  // 1. Kiểm tra xem Email đã được đăng ký trong hệ thống chưa
+  // 1. Kiểm tra xem Email đã tồn tại trong Auth hoặc Profiles chưa
   const { data: existingProfile } = await adminClient
     .from("profiles")
     .select("id, role")
@@ -42,7 +44,7 @@ export async function registerTeacher(formData: FormData): Promise<AuthState> {
     };
   }
 
-  // 2. Tạo tài khoản Giáo viên với email_confirm: true (cho phép đăng nhập ngay không cần đợi email)
+  // 2. Tạo tài khoản Giáo viên với email_confirm: true
   const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
     email,
     password,
@@ -54,8 +56,13 @@ export async function registerTeacher(formData: FormData): Promise<AuthState> {
   });
 
   if (authError) {
-    if (authError.message.toLowerCase().includes("already") || authError.message.toLowerCase().includes("exists")) {
-      return { error: "Tài khoản email này đã được sử dụng! Vui lòng sử dụng email khác hoặc Đăng nhập." };
+    if (
+      authError.message.toLowerCase().includes("already") ||
+      authError.message.toLowerCase().includes("exists")
+    ) {
+      return {
+        error: "Tài khoản email này đã tồn tại trên hệ thống! Vui lòng đăng nhập.",
+      };
     }
     return { error: `Đăng ký thất bại: ${authError.message}` };
   }
@@ -75,21 +82,20 @@ export async function registerTeacher(formData: FormData): Promise<AuthState> {
   });
 
   if (profileError) {
-    return { error: `Lỗi tạo hồ sơ giáo viên: ${profileError.message}` };
+    return { error: `Lỗi lưu hồ sơ giáo viên: ${profileError.message}` };
   }
 
-  // 4. Tự động Đăng nhập luôn cho Giáo viên ngay sau khi đăng ký
-  const { error: autoSignInError } = await supabase.auth.signInWithPassword({
+  // 4. Đăng nhập để lưu cookie session
+  await supabase.auth.signInWithPassword({
     email,
     password,
   });
 
-  if (autoSignInError) {
-    // Nếu tự đăng nhập lỗi thì yêu cầu người dùng tự đăng nhập ở trang login
-    return { success: true };
-  }
-
-  return { success: true };
+  return {
+    success: true,
+    role: "teacher",
+    redirectUrl: "/dashboard",
+  };
 }
 
 /**
@@ -122,23 +128,38 @@ export async function loginUser(formData: FormData): Promise<AuthState> {
     loginEmail = profile.email;
   }
 
-  // Thực hiện đăng nhập
-  const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+  // Thử đăng nhập lần 1
+  let { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
     email: loginEmail,
     password,
   });
 
-  if (signInErr) {
-    if (signInErr.message.includes("Invalid login credentials")) {
-      return { error: "Tài khoản hoặc mật khẩu không chính xác! Vui lòng kiểm tra lại." };
+  // Nếu bị lỗi do tài khoản cũ chưa kích hoạt email, tự động kích hoạt giúp người dùng
+  if (signInErr && signInErr.message.toLowerCase().includes("email not confirmed")) {
+    const { data: userList } = await adminClient.auth.admin.listUsers();
+    const targetUser = userList?.users?.find((u) => u.email?.toLowerCase() === loginEmail);
+    if (targetUser) {
+      await adminClient.auth.admin.updateUserById(targetUser.id, {
+        email_confirm: true,
+      });
+      // Thử đăng nhập lại sau khi kích hoạt
+      const retryResult = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password,
+      });
+      signInData = retryResult.data;
+      signInErr = retryResult.error;
     }
-    if (signInErr.message.includes("Email not confirmed")) {
-      return { error: "Email tài khoản chưa được xác thực trên hệ thống." };
-    }
-    return { error: `Đăng nhập thất bại: ${signInErr.message}` };
   }
 
-  // Lấy role của user để chuyển hướng đúng trang
+  if (signInErr || !signInData?.user) {
+    if (signInErr?.message.includes("Invalid login credentials")) {
+      return { error: "Mật khẩu hoặc thông tin đăng nhập không chính xác! Vui lòng kiểm tra lại." };
+    }
+    return { error: `Đăng nhập không thành công: ${signInErr?.message || "Lỗi không xác định"}` };
+  }
+
+  // Lấy role của user để xác định trang điều hướng
   const { data: profile } = await adminClient
     .from("profiles")
     .select("role")
@@ -146,18 +167,19 @@ export async function loginUser(formData: FormData): Promise<AuthState> {
     .single();
 
   const role = profile?.role || "teacher";
+  const redirectUrl = role === "student" ? "/student" : "/dashboard";
 
-  if (role === "student") {
-    redirect("/student");
-  } else {
-    redirect("/dashboard");
-  }
+  return {
+    success: true,
+    role,
+    redirectUrl,
+  };
 }
 
 /**
  * Đăng xuất
  */
-export async function logoutUser() {
+export async function logoutUser(): Promise<void> {
   const supabase = await createClient();
   await supabase.auth.signOut();
   redirect("/login");

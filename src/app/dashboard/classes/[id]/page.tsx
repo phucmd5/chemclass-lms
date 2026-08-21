@@ -2,7 +2,14 @@
 
 import React, { useState, useEffect, use } from "react";
 import Link from "next/link";
-import { getClassDetails, addStudentToClass, removeStudentFromClass } from "@/app/actions/classes";
+import { useRouter } from "next/navigation";
+import {
+  getClassDetails,
+  addStudentToClass,
+  removeStudentFromClass,
+  updateClass,
+  deleteClass,
+} from "@/app/actions/classes";
 import { createSchedule, deleteSchedule } from "@/app/actions/schedules";
 import {
   Users,
@@ -11,6 +18,7 @@ import {
   UserPlus,
   Plus,
   Trash2,
+  Edit,
   ArrowLeft,
   GraduationCap,
   Clock,
@@ -20,15 +28,23 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
+  X,
+  CreditCard,
 } from "lucide-react";
 
 export default function ClassDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const classId = resolvedParams.id;
+  const router = useRouter();
 
   const [clsData, setClsData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"students" | "schedules">("students");
+
+  // State cho Modal Sửa lớp
+  const [showEditClassModal, setShowEditClassModal] = useState(false);
+  const [updatingClass, setUpdatingClass] = useState(false);
+  const [editClassError, setEditClassError] = useState<string | null>(null);
 
   // State cho Modal thêm học sinh (Phương án A)
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
@@ -50,6 +66,38 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     loadData();
   }, [classId]);
+
+  async function handleUpdateClass(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setUpdatingClass(true);
+    setEditClassError(null);
+
+    const formData = new FormData(e.currentTarget);
+    formData.append("classId", classId);
+
+    const res = await updateClass(formData);
+    setUpdatingClass(false);
+
+    if (res.error) {
+      setEditClassError(res.error);
+    } else {
+      setShowEditClassModal(false);
+      loadData();
+    }
+  }
+
+  async function handleDeleteClass() {
+    if (!confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN lớp "${clsData?.name}"?\nToàn bộ học sinh và lịch học của lớp này sẽ bị xóa.`)) {
+      return;
+    }
+
+    const res = await deleteClass(classId);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      router.push("/dashboard/classes");
+    }
+  }
 
   async function handleAddStudent(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -121,7 +169,6 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  // Tự động gợi ý mã học sinh tiếp theo (Ví dụ HS01, HS02...)
   const nextStudentCode = `HS${String(clsData.students.length + 1).padStart(2, "0")}`;
 
   return (
@@ -151,18 +198,36 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
 
-        {/* Google Meet Link Header */}
-        {clsData.meet_link && (
-          <a
-            href={clsData.meet_link.startsWith("http") ? clsData.meet_link : `https://${clsData.meet_link}`}
-            target="_blank"
-            rel="noreferrer"
-            className="px-4 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-2 transition-all self-start sm:self-auto"
+        {/* Buttons: Sửa lớp, Xóa lớp, Link Meet */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {clsData.meet_link && (
+            <a
+              href={clsData.meet_link.startsWith("http") ? clsData.meet_link : `https://${clsData.meet_link}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3.5 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            >
+              <Video className="w-4 h-4" />
+              <span>Google Meet</span>
+            </a>
+          )}
+
+          <button
+            onClick={() => setShowEditClassModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/10 text-xs font-semibold flex items-center gap-1.5 transition-all"
           >
-            <Video className="w-4 h-4" />
-            <span>Mở Google Meet của Lớp</span>
-          </a>
-        )}
+            <Edit className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Sửa Lớp</span>
+          </button>
+
+          <button
+            onClick={handleDeleteClass}
+            className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Xoá Lớp</span>
+          </button>
+        </div>
       </div>
 
       {/* Navigation Tabs */}
@@ -346,6 +411,124 @@ export default function ClassDetailPage({ params }: { params: Promise<{ id: stri
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* MODAL: Sửa thông tin Lớp học */}
+      {showEditClassModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative">
+            <button
+              onClick={() => setShowEditClassModal(false)}
+              className="absolute top-6 right-6 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Edit className="w-5 h-5 text-indigo-400" />
+                Chỉnh Sửa Thông Tin Lớp
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">Cập nhật tên, khối học, link Meet hoặc học phí</p>
+            </div>
+
+            {editClassError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                {editClassError}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateClass} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Tên Lớp Học *
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  defaultValue={clsData.name}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                    Khối Lớp *
+                  </label>
+                  <select
+                    name="grade"
+                    required
+                    defaultValue={clsData.grade}
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  >
+                    <option value="10">Khối 10</option>
+                    <option value="11">Khối 11</option>
+                    <option value="12">Khối 12</option>
+                    <option value="Khác">Luyện thi ĐH / Khác</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                    Học phí / Tháng (VNĐ)
+                  </label>
+                  <input
+                    type="number"
+                    name="monthlyFee"
+                    defaultValue={clsData.monthly_fee || 500000}
+                    step="10000"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Link Google Meet Cố Định
+                </label>
+                <input
+                  type="text"
+                  name="meetLink"
+                  defaultValue={clsData.meet_link || ""}
+                  placeholder="https://meet.google.com/..."
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Mô tả / Ghi chú
+                </label>
+                <textarea
+                  name="description"
+                  rows={2}
+                  defaultValue={clsData.description || ""}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowEditClassModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingClass}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {updatingClass && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Lưu Thay Đổi</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

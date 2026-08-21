@@ -16,14 +16,14 @@ export default function LoginPage() {
     setErrorMsg(null);
 
     const formData = new FormData(e.currentTarget);
-    try {
-      const res = await loginUser(formData);
-      if (res?.error) {
-        setErrorMsg(res.error);
-        setLoading(false);
-      }
-    } catch {
-      // Redirect throws an expected error in Next.js Server Actions
+    const res = await loginUser(formData);
+
+    if (res?.error) {
+      setErrorMsg(res.error);
+      setLoading(false);
+    } else if (res?.success && res.redirectUrl) {
+      // Dùng window.location.href để đảm bảo cookie phiên đăng nhập được nạp hoàn chỉnh
+      window.location.href = res.redirectUrl;
     }
   }
 
@@ -98,7 +98,7 @@ export default function LoginPage() {
                 name="identifier"
                 required
                 placeholder={
-                  roleTab === "teacher" ? "thaygiao@gmail.com" : "Ví dụ: HS01 hoặc HS002"
+                  roleTab === "teacher" ? "giaovien@gmail.com" : "Ví dụ: HS01 hoặc HS002"
                 }
                 className="w-full pl-11 pr-4 py-3 rounded-xl bg-slate-950/60 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm transition-all"
               />
@@ -145,7 +145,7 @@ export default function LoginPage() {
             {loading ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <span>Đang xử lý...</span>
+                <span>Đang xử lý đăng nhập...</span>
               </>
             ) : (
               <>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { getTeacherClasses, createClass } from "@/app/actions/classes";
+import { getTeacherClasses, createClass, deleteClass, updateClass } from "@/app/actions/classes";
 import {
   Users,
   Plus,
@@ -13,14 +13,23 @@ import {
   Loader2,
   X,
   CreditCard,
+  Trash2,
+  Edit,
 } from "lucide-react";
 
 export default function ClassesPage() {
   const [classes, setClasses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Modal Tạo lớp
   const [showModal, setShowModal] = useState(false);
   const [creating, setCreating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Modal Sửa lớp
+  const [editingClass, setEditingClass] = useState<any | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   async function loadClasses() {
     setLoading(true);
@@ -50,6 +59,38 @@ export default function ClassesPage() {
     }
   }
 
+  async function handleUpdateClass(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingClass) return;
+
+    setUpdating(true);
+    setEditError(null);
+
+    const formData = new FormData(e.currentTarget);
+    formData.append("classId", editingClass.id);
+
+    const res = await updateClass(formData);
+    setUpdating(false);
+
+    if (res.error) {
+      setEditError(res.error);
+    } else {
+      setEditingClass(null);
+      loadClasses();
+    }
+  }
+
+  async function handleDeleteClass(id: string, name: string) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa lớp "${name}" không?`)) return;
+
+    const res = await deleteClass(id);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      loadClasses();
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -60,7 +101,7 @@ export default function ClassesPage() {
             Quản Lý Lớp Học & Học Sinh
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Tạo lớp mới, quản lý danh sách học sinh và cấp tài khoản tự động
+            Tạo lớp mới, chỉnh sửa thông tin, xóa lớp và quản lý danh sách học sinh
           </p>
         </div>
 
@@ -113,8 +154,22 @@ export default function ClassesPage() {
                       {cls.name}
                     </h3>
                   </div>
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 border border-white/5 flex-shrink-0">
-                    <GraduationCap className="w-5 h-5" />
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setEditingClass(cls)}
+                      className="p-2 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-white/5 transition-all"
+                      title="Sửa thông tin lớp"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteClass(cls.id, cls.name)}
+                      className="p-2 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                      title="Xóa lớp học"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
 
@@ -259,9 +314,6 @@ export default function ClassesPage() {
                   placeholder="https://meet.google.com/abc-defg-hij"
                   className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  💡 Link phòng học Google Meet cố định cho học sinh của lớp này.
-                </p>
               </div>
 
               <div>
@@ -291,6 +343,124 @@ export default function ClassesPage() {
                 >
                   {creating && <Loader2 className="w-4 h-4 animate-spin" />}
                   <span>Tạo Lớp Học</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Sửa lớp */}
+      {editingClass && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative">
+            <button
+              onClick={() => setEditingClass(null)}
+              className="absolute top-6 right-6 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Edit className="w-5 h-5 text-indigo-400" />
+                Sửa Thông Tin Lớp Học
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">Cập nhật lớp {editingClass.name}</p>
+            </div>
+
+            {editError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                {editError}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateClass} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Tên Lớp Học *
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  required
+                  defaultValue={editingClass.name}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                    Khối Lớp *
+                  </label>
+                  <select
+                    name="grade"
+                    required
+                    defaultValue={editingClass.grade}
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  >
+                    <option value="10">Khối 10</option>
+                    <option value="11">Khối 11</option>
+                    <option value="12">Khối 12</option>
+                    <option value="Khác">Luyện thi ĐH / Khác</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                    Học phí / Tháng (VNĐ)
+                  </label>
+                  <input
+                    type="number"
+                    name="monthlyFee"
+                    defaultValue={editingClass.monthly_fee || 500000}
+                    step="10000"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Link Google Meet Cố Định
+                </label>
+                <input
+                  type="text"
+                  name="meetLink"
+                  defaultValue={editingClass.meet_link || ""}
+                  placeholder="https://meet.google.com/..."
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
+                  Mô tả / Ghi chú
+                </label>
+                <textarea
+                  name="description"
+                  rows={2}
+                  defaultValue={editingClass.description || ""}
+                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950/60 border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setEditingClass(null)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-600/30 flex items-center gap-2 disabled:opacity-50"
+                >
+                  {updating && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>Lưu Thay Đổi</span>
                 </button>
               </div>
             </form>

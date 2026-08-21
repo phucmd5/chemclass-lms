@@ -40,10 +40,10 @@ export async function getTeacherClasses() {
  * Tạo lớp học mới
  */
 export async function createClass(formData: FormData) {
-  const name = formData.get("name") as string;
+  const name = (formData.get("name") as string)?.trim();
   const grade = formData.get("grade") as string;
-  const description = (formData.get("description") as string) || "";
-  const meetLink = (formData.get("meetLink") as string) || "";
+  const description = (formData.get("description") as string)?.trim() || "";
+  const meetLink = (formData.get("meetLink") as string)?.trim() || "";
   const monthlyFee = parseFloat((formData.get("monthlyFee") as string) || "0");
 
   if (!name || !grade) {
@@ -76,6 +76,74 @@ export async function createClass(formData: FormData) {
 
   revalidatePath("/dashboard/classes");
   return { success: true, classId: data.id };
+}
+
+/**
+ * Cập nhật thông tin Lớp học (Sửa tên, khối, Google Meet, học phí, mô tả)
+ */
+export async function updateClass(formData: FormData) {
+  const classId = formData.get("classId") as string;
+  const name = (formData.get("name") as string)?.trim();
+  const grade = formData.get("grade") as string;
+  const description = (formData.get("description") as string)?.trim() || "";
+  const meetLink = (formData.get("meetLink") as string)?.trim() || "";
+  const monthlyFee = parseFloat((formData.get("monthlyFee") as string) || "0");
+
+  if (!classId || !name || !grade) {
+    return { error: "Vui lòng điền đầy đủ tên lớp và khối lớp!" };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Bạn chưa đăng nhập!" };
+  }
+
+  const { error } = await supabase
+    .from("classes")
+    .update({
+      name,
+      grade,
+      description,
+      meet_link: meetLink,
+      monthly_fee: monthlyFee,
+    })
+    .eq("id", classId)
+    .eq("teacher_id", user.id);
+
+  if (error) {
+    return { error: `Lỗi cập nhật lớp học: ${error.message}` };
+  }
+
+  revalidatePath("/dashboard/classes");
+  revalidatePath(`/dashboard/classes/${classId}`);
+  return { success: true };
+}
+
+/**
+ * Xóa một Lớp học (Tự động xóa danh sách học sinh và lịch học liên quan)
+ */
+export async function deleteClass(classId: string) {
+  if (!classId) return { error: "Thiếu mã lớp học!" };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Bạn chưa đăng nhập!" };
+
+  const { error } = await supabase
+    .from("classes")
+    .delete()
+    .eq("id", classId)
+    .eq("teacher_id", user.id);
+
+  if (error) {
+    return { error: `Lỗi xóa lớp học: ${error.message}` };
+  }
+
+  revalidatePath("/dashboard/classes");
+  return { success: true };
 }
 
 /**
@@ -145,8 +213,6 @@ export async function addStudentToClass(formData: FormData) {
   }
 
   const adminClient = createAdminClient();
-
-  // Email nội bộ tự động để Supabase Auth quản lý
   const internalEmail = `${studentCode.toLowerCase()}@chemclass.local`;
 
   // 1. Kiểm tra xem học sinh có mã này đã tồn tại chưa

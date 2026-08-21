@@ -2,12 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { registerTeacher } from "@/app/actions/auth";
 import { FlaskConical, GraduationCap, Mail, Lock, User, Phone, ArrowRight, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 export default function RegisterPage() {
-  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -20,14 +18,14 @@ export default function RegisterPage() {
     const formData = new FormData(e.currentTarget);
     const res = await registerTeacher(formData);
 
-    setLoading(false);
     if (res?.error) {
       setErrorMsg(res.error);
-    } else {
+      setLoading(false);
+    } else if (res?.success) {
       setSuccess(true);
       setTimeout(() => {
-        router.push("/dashboard");
-      }, 1500);
+        window.location.href = res.redirectUrl || "/dashboard";
+      }, 500);
     }
   }
 
@@ -60,14 +58,14 @@ export default function RegisterPage() {
         {success && (
           <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-            <span>Đăng ký thành công! Đang chuyển hướng vào Dashboard...</span>
+            <span>Đăng ký thành công! Đang vào Dashboard...</span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-              Họ và tên Giáo viên
+              Họ và tên Giáo viên *
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -85,7 +83,7 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-              Email đăng nhập
+              Email đăng nhập *
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -120,7 +118,7 @@ export default function RegisterPage() {
 
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-              Mật khẩu
+              Mật khẩu *
             </label>
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
