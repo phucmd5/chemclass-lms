@@ -13,6 +13,7 @@ import {
 import { getTeacherClasses } from "@/app/actions/classes";
 import { GRADE_OPTIONS } from "@/lib/constants";
 import { MathText } from "@/components/KatexFormula";
+import { generateExamDocx } from "@/lib/word-export";
 import {
   Sparkles,
   BookOpen,
@@ -35,6 +36,9 @@ import {
   Send,
   RefreshCw,
   Copy,
+  FileText,
+  Download,
+  Table as TableIcon,
 } from "lucide-react";
 
 // Gợi ý chuyên đề Hóa học & KHTN THCS theo từng khối lớp
@@ -86,6 +90,7 @@ export default function AIExamStudioPage() {
   const [questionCount, setQuestionCount] = useState<number>(5);
   const [difficulty, setDifficulty] = useState<string>("Tổng hợp (Ma trận chuẩn)");
   const [questionType, setQuestionType] = useState<"multiple_choice" | "short_answer" | "mixed">("multiple_choice");
+  const [isFinalExam, setIsFinalExam] = useState<boolean>(false);
   const [customInstructions, setCustomInstructions] = useState<string>("");
   const [generating, setGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -100,6 +105,7 @@ export default function AIExamStudioPage() {
   const [isPublished, setIsPublished] = useState<boolean>(true);
   const [savingExam, setSavingExam] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isExportingWord, setIsExportingWord] = useState(false);
 
   // Modal Preview / Print
   const [previewExam, setPreviewExam] = useState<any | null>(null);
@@ -154,9 +160,59 @@ export default function AIExamStudioPage() {
     } else if (res.questions) {
       setGeneratedQuestions(res.questions);
       if (!examTitle) {
-        setExamTitle(`Kiểm tra ${durationMinutes} phút - ${topic.trim()} (Khối ${selectedGrade})`);
+        const examPrefix = isFinalExam ? "ĐỀ KIỂM TRA CUỐI HỌC KỲ" : `Kiểm tra ${durationMinutes} phút`;
+        setExamTitle(`${examPrefix} - ${topic.trim()} (Khối ${selectedGrade})`);
       }
       showToast(`AI đã biên soạn thành công ${res.questions.length} câu hỏi chuẩn KaTeX!`);
+    }
+  }
+
+  // Xuất file Word (.docx) từ bộ câu hỏi hiện tại hoặc từ đề thi đã lưu
+  async function handleExportDocx(examData?: any) {
+    try {
+      setIsExportingWord(true);
+
+      const targetTitle = examData ? examData.title : examTitle || "De_Kiem_Tra_Hoa_Hoc";
+      const targetGrade = examData ? examData.classes?.grade || "8" : selectedGrade;
+      const targetDuration = examData ? examData.duration_minutes || 45 : durationMinutes;
+      const targetTotalPoints = examData ? examData.total_points || 10 : 10;
+      const targetQuestions = examData ? examData.questions : generatedQuestions;
+      const targetIsFinal = examData ? examData.title.toLowerCase().includes("cuối") : isFinalExam;
+      const targetTopic = examData ? examData.title : topic || "Hóa học THCS";
+
+      if (!targetQuestions || targetQuestions.length === 0) {
+        alert("Chưa có câu hỏi nào để xuất file Word!");
+        setIsExportingWord(false);
+        return;
+      }
+
+      const blob = await generateExamDocx({
+        title: targetTitle,
+        grade: targetGrade,
+        durationMinutes: targetDuration,
+        totalPoints: targetTotalPoints,
+        isFinalExam: targetIsFinal,
+        topic: targetTopic,
+        questions: targetQuestions,
+      });
+
+      // Kích hoạt tải file .docx về máy
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeFileName = targetTitle.replace(/[^a-zA-Z0-9_\u00C0-\u1EF9]/g, "_");
+      a.download = `${safeFileName}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      showToast("Đã xuất file Word (.docx) chuẩn Bộ Giáo Dục thành công!");
+    } catch (err: any) {
+      console.error("Lỗi xuất Word:", err);
+      alert("Lỗi xuất file Word: " + err.message);
+    } finally {
+      setIsExportingWord(false);
     }
   }
 
@@ -183,7 +239,7 @@ export default function AIExamStudioPage() {
         options_json: q.options || [],
         correct_answer: q.correct_answer || "A",
         explanation: q.explanation || "",
-        points: 10 / generatedQuestions.length,
+        points: Math.round((10 / generatedQuestions.length) * 100) / 100,
       })),
     });
 
@@ -233,7 +289,7 @@ export default function AIExamStudioPage() {
     setLoadingPreview(false);
   }
 
-  // Chỉnh sửa nhanh câu hỏi sinh ra
+  // Xóa câu hỏi khỏi bộ đề
   function handleRemoveQuestion(index: number) {
     setGeneratedQuestions((prev) => prev.filter((_, i) => i !== index));
   }
@@ -253,10 +309,10 @@ export default function AIExamStudioPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-cyan-400" />
-            Soạn Đề Thi AI & Quản Lý Đề Kiểm Tra (THCS)
+            Soạn Đề Thi AI & Xuất File Word (Chuẩn Bộ GD&ĐT)
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Biên soạn đề trắc nghiệm & tự luận Hóa học chuẩn KaTeX LaTeX bằng Google Gemini AI
+            Biên soạn đề trắc nghiệm & tự luận Hóa học, xuất file Word (.docx) kèm Ma trận GDPT 2018 và Đáp án chi tiết
           </p>
         </div>
 
@@ -303,7 +359,7 @@ export default function AIExamStudioPage() {
               </div>
               <h3 className="text-base font-bold text-white">Chưa có đề thi nào</h3>
               <p className="text-xs text-slate-400">
-                Hãy trải nghiệm tính năng <strong>Soạn Đề Bằng AI</strong> để tự động tạo đề thi Hóa học chất lượng cao chỉ trong vài giây!
+                Hãy trải nghiệm tính năng <strong>Soạn Đề Bằng AI</strong> để tự động tạo đề thi Hóa học và xuất file Word chuẩn Bộ Giáo Dục chỉ trong vài giây!
               </p>
               <button
                 onClick={() => setActiveTab("create_ai")}
@@ -360,31 +416,45 @@ export default function AIExamStudioPage() {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => handleOpenPreview(ex.id)}
-                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
-                      title="Xem trước & In đề"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>In Đề</span>
-                    </button>
+                  <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={async () => {
+                          const detail = await getExamWithQuestions(ex.id);
+                          if (detail) handleExportDocx(detail);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-semibold flex items-center gap-1 transition-all"
+                        title="Xuất file Word (.docx) chuẩn Bộ GD"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Word</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleOpenPreview(ex.id)}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-all"
+                        title="Xem trước & In đề"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>In</span>
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => handleTogglePublish(ex.id, ex.is_published)}
-                        className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                           ex.is_published
                             ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30"
                             : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30"
                         }`}
                       >
-                        {ex.is_published ? "Thu hồi" : "Xuất bản"}
+                        {ex.is_published ? "Thu hồi" : "Mở thi"}
                       </button>
 
                       <button
                         onClick={() => handleDeleteExam(ex.id, ex.title)}
-                        className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                        className="p-1.5 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
                         title="Xóa đề thi"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -410,7 +480,7 @@ export default function AIExamStudioPage() {
                   Cấu Hình Sinh Đề AI (Gemini)
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Chọn khối lớp và chuyên đề để AI tự động tạo câu hỏi có công thức hóa học
+                  Chọn khối lớp và chuyên đề để AI tự động tạo câu hỏi chuẩn KaTeX và Ma trận đề thi
                 </p>
               </div>
 
@@ -422,6 +492,31 @@ export default function AIExamStudioPage() {
               )}
 
               <form onSubmit={handleGenerateAI} className="space-y-4">
+                {/* Loại Đề Thi: Cuối kỳ (có ma trận) hoặc Thường */}
+                <div className="p-3.5 rounded-2xl bg-indigo-950/40 border border-indigo-500/30 space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-white font-bold">
+                    <input
+                      type="checkbox"
+                      checked={isFinalExam}
+                      onChange={(e) => {
+                        setIsFinalExam(e.target.checked);
+                        if (e.target.checked && questionCount < 10) {
+                          setQuestionCount(10);
+                          setDurationMinutes(45);
+                        }
+                      }}
+                      className="rounded border-white/20 text-cyan-500 focus:ring-cyan-400 w-4 h-4"
+                    />
+                    <span className="flex items-center gap-1.5 text-cyan-300">
+                      <TableIcon className="w-4 h-4 text-cyan-400" />
+                      Đề Thi Cuối Học Kỳ (Chuẩn Bộ GD&ĐT)
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    💡 Khi chọn chế độ này, file Word xuất ra sẽ tự động bao gồm <strong>Khung Ma Trận Đề Thi & Bản Đặc Tả GDPT 2018</strong> theo đúng 4 mức độ nhận thức của Bộ Giáo Dục.
+                  </p>
+                </div>
+
                 {/* Chọn Khối lớp */}
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
@@ -488,7 +583,7 @@ export default function AIExamStudioPage() {
                     >
                       <option value={3}>3 câu (Thử nghiệm)</option>
                       <option value={5}>5 câu (Kiểm tra 15p)</option>
-                      <option value={10}>10 câu (Kiểm tra 45p)</option>
+                      <option value={10}>10 câu (Chuẩn 45p)</option>
                       <option value={15}>15 câu (Đề tổng hợp)</option>
                       <option value={20}>20 câu (Thi học kỳ)</option>
                     </select>
@@ -535,7 +630,7 @@ export default function AIExamStudioPage() {
                     rows={2}
                     value={customInstructions}
                     onChange={(e) => setCustomInstructions(e.target.value)}
-                    placeholder="Ví dụ: Tập trung vào bài toán tính khối lượng kết tủa, có phương trình nhiệt phân..."
+                    placeholder="Ví dụ: Tập trung vào bài toán tính nồng độ mol, phương trình nhiệt phân..."
                     className="w-full px-3 py-2 rounded-xl bg-slate-950/80 border border-white/10 text-white placeholder-slate-500 text-xs focus:ring-2 focus:ring-cyan-500 focus:outline-none"
                   />
                 </div>
@@ -561,7 +656,7 @@ export default function AIExamStudioPage() {
             </div>
           </div>
 
-          {/* Right 7 Cols: Question Workspace & Live KaTeX Preview */}
+          {/* Right 7 Cols: Question Workspace & Word Export */}
           <div className="lg:col-span-7 space-y-6">
             {generatedQuestions.length === 0 ? (
               <div className="p-12 rounded-3xl bg-slate-900/40 border border-dashed border-white/10 text-center space-y-3 min-h-[400px] flex flex-col items-center justify-center">
@@ -570,20 +665,35 @@ export default function AIExamStudioPage() {
                 </div>
                 <h3 className="text-base font-bold text-white">Không gian soạn đề AI</h3>
                 <p className="text-xs text-slate-400 max-w-sm">
-                  Chọn chủ đề và bấm <strong>"Bấm Để AI Biên Soạn Đề Thi"</strong> ở khung bên trái. Bộ câu hỏi kèm công thức LaTeX và giải thích chi tiết sẽ xuất hiện tại đây để bạn kiểm duyệt và lưu lại.
+                  Chọn chủ đề và bấm <strong>"Bấm Để AI Biên Soạn Đề Thi"</strong> ở khung bên trái. Bộ câu hỏi kèm công thức LaTeX sẽ xuất hiện tại đây để bạn lưu vào lớp học hoặc xuất thẳng ra file Word (.docx) chuẩn Bộ Giáo Dục.
                 </p>
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Save Form Banner */}
+                {/* Save Form & Word Export Bar */}
                 <div className="p-6 rounded-3xl bg-indigo-950/70 border border-indigo-500/30 backdrop-blur-xl space-y-4 shadow-2xl">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
-                        Lưu Đề Thi ({generatedQuestions.length} câu hỏi)
+                        {isFinalExam ? "ĐỀ THI CUỐI HỌC KỲ (CÓ MA TRẬN)" : "ĐỀ KIỂM TRA ĐỊNH KỲ"} ({generatedQuestions.length} câu hỏi)
                       </span>
-                      <h3 className="text-base font-bold text-white mt-0.5">Xuất Bản Cho Học Sinh</h3>
+                      <h3 className="text-base font-bold text-white mt-0.5">Tùy Chọn Lưu & Xuất Bản</h3>
                     </div>
+
+                    {/* NÚT XUẤT FILE WORD (.DOCX) CHUẨN BỘ GIÁO DỤC */}
+                    <button
+                      type="button"
+                      onClick={() => handleExportDocx()}
+                      disabled={isExportingWord}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 flex items-center gap-2 transition-all self-start sm:self-auto"
+                    >
+                      {isExportingWord ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <FileText className="w-4 h-4 text-cyan-300" />
+                      )}
+                      <span>Xuất File Word (.docx)</span>
+                    </button>
                   </div>
 
                   {saveError && (
@@ -662,7 +772,7 @@ export default function AIExamStudioPage() {
                       >
                         {savingExam && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                         <Save className="w-4 h-4" />
-                        <span>Lưu & Xuất Bản Đề Thi</span>
+                        <span>Lưu Đề Thi Vào Lớp</span>
                       </button>
                     </div>
                   </form>
@@ -768,7 +878,7 @@ export default function AIExamStudioPage() {
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center justify-between pr-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pr-8">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400">
                   Bản In Đề Kiểm Tra Hóa Học
@@ -779,13 +889,23 @@ export default function AIExamStudioPage() {
                 </p>
               </div>
 
-              <button
-                onClick={() => window.print()}
-                className="px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-400/25 flex items-center gap-1.5 transition-all"
-              >
-                <Printer className="w-4 h-4" />
-                <span>In Đề (Print)</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleExportDocx(previewExam)}
+                  className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-600/25 flex items-center gap-1.5 transition-all"
+                >
+                  <FileText className="w-4 h-4 text-cyan-300" />
+                  <span>Xuất Word (.docx)</span>
+                </button>
+
+                <button
+                  onClick={() => window.print()}
+                  className="px-3.5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-400/25 flex items-center gap-1.5 transition-all"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>In Đề (Print)</span>
+                </button>
+              </div>
             </div>
 
             {/* Questions List for Printing */}
