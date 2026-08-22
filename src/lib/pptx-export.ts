@@ -18,6 +18,11 @@ export interface SlideItem {
       answer: string;
       explanation: string;
     };
+    summary?: {
+      keyPoints: string[];
+      formulas?: string[];
+      homework?: string;
+    };
   };
   speakerNotes?: string;
 }
@@ -31,35 +36,126 @@ export interface SlideDeck {
   slides: SlideItem[];
 }
 
+function extractBalancedBraces(str: string, startIndex: number) {
+  let depth = 0;
+  let start = -1;
+  for (let i = startIndex; i < str.length; i++) {
+    if (str[i] === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (str[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        return { start, end: i, content: str.slice(start + 1, i) };
+      }
+    }
+  }
+  return null;
+}
+
+function parseFractionsRecursively(text: string): string {
+  let result = text;
+  let fracIdx = result.indexOf("\\frac");
+
+  while (fracIdx !== -1) {
+    const firstBrace = extractBalancedBraces(result, fracIdx + 5);
+    if (!firstBrace) break;
+
+    const secondBrace = extractBalancedBraces(result, firstBrace.end + 1);
+    if (!secondBrace) break;
+
+    const num = parseFractionsRecursively(firstBrace.content);
+    const denom = parseFractionsRecursively(secondBrace.content);
+
+    const fullFrac = result.slice(fracIdx, secondBrace.end + 1);
+    result = result.replace(fullFrac, `(${num} / ${denom})`);
+
+    fracIdx = result.indexOf("\\frac");
+  }
+
+  return result;
+}
+
 /**
- * Chuyển đổi công thức LaTeX sang chuỗi ký tự Unicode Hóa học
+ * Chuyển đổi công thức LaTeX sang chuỗi ký tự Unicode Hóa học & Toán học chính xác
  */
-function cleanLatexForPptx(text: string): string {
+export function cleanLatexForPptx(text: string): string {
   if (!text) return "";
-  return text
-    .replace(/\$\$/g, "")
-    .replace(/\$/g, "")
+
+  let res = text;
+
+  // 1. Gỡ bỏ dấu bọc LaTeX $$ và $
+  res = res.replace(/\$\$/g, "").replace(/\$/g, "");
+
+  // 2. Thay thế các ký hiệu cơ bản trước
+  res = res
     .replace(/\\rightarrow/g, " ──> ")
     .replace(/\\xrightarrow\{t\^o\}/g, " ──(t°)──> ")
     .replace(/\\xrightarrow\{([^}]+)\}/g, " ──($1)──> ")
     .replace(/\\uparrow/g, " ↑")
     .replace(/\\downarrow/g, " ↓")
     .replace(/\\times/g, " × ")
-    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)")
-    .replace(/_0/g, "₀")
-    .replace(/_1/g, "₁")
-    .replace(/_2/g, "₂")
-    .replace(/_3/g, "₃")
-    .replace(/_4/g, "₄")
-    .replace(/_5/g, "₅")
-    .replace(/_6/g, "₆")
-    .replace(/_7/g, "₇")
-    .replace(/_8/g, "₈")
-    .replace(/_9/g, "₉")
-    .replace(/\^2/g, "²")
-    .replace(/\^3/g, "³")
-    .replace(/\^o/g, "°")
-    .replace(/\^([0-9\+\-]+)/g, " ($1)");
+    .replace(/\\cdot/g, " · ")
+    .replace(/\\%/g, "%")
+    .replace(/\\approx/g, " ≈ ")
+    .replace(/\\le/g, " ≤ ")
+    .replace(/\\ge/g, " ≥ ")
+    .replace(/\\neq/g, " ≠ ")
+    .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
+    .replace(/\\Delta/g, "Δ")
+    .replace(/\\alpha/g, "α")
+    .replace(/\\beta/g, "β")
+    .replace(/\\gamma/g, "γ")
+    .replace(/\\text\{([^}]+)\}/g, "$1")
+    .replace(/\\mathrm\{([^}]+)\}/g, "$1")
+    .replace(/\\mathbf\{([^}]+)\}/g, "$1")
+    .replace(/\\textbf\{([^}]+)\}/g, "$1");
+
+  // 3. Xử lý phân số chuẩn xác (hỗ trợ ngoặc nhọn lồng nhau)
+  res = parseFractionsRecursively(res);
+
+  // 4. Chỉ số dưới dạng {ct}, {dd}, {H2O}, {pt}, {pu}, {kt}, {chat tan}, v.v.
+  res = res
+    .replace(/_\{ct\}/gi, "_ct")
+    .replace(/_\{dd\}/gi, "_dd")
+    .replace(/_\{dm\}/gi, "_dm")
+    .replace(/_\{pu\}/gi, "_pư")
+    .replace(/_\{kt\}/gi, "_kt")
+    .replace(/_\{chất tan\}/gi, "_chất tan")
+    .replace(/_\{dung dịch\}/gi, "_dung dịch")
+    .replace(/_\{dung môi\}/gi, "_dung môi")
+    .replace(/_\{([a-zA-Z\s]+)\}/g, "_$1");
+
+  // 5. Chỉ số dưới hóa học & số mũ
+  const subscriptMap: Record<string, string> = {
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+    "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+  };
+  const superscriptMap: Record<string, string> = {
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+    "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+    "o": "°",
+  };
+
+  res = res.replace(/_\{([0-9\+\-\(\)]+)\}/g, (_, digits) =>
+    digits.split("").map((d: string) => subscriptMap[d] || d).join("")
+  );
+  res = res.replace(/_([0-9])/g, (_, d: string) => subscriptMap[d] || d);
+
+  res = res.replace(/\^\{([0-9\+\-\(\)o]+)\}/g, (_, digits) =>
+    digits.split("").map((d: string) => superscriptMap[d] || d).join("")
+  );
+  res = res.replace(/\^([0-9o])/g, (_, d: string) => superscriptMap[d] || d);
+
+  // Xử lý n_{H2O} -> n_H₂O
+  res = res.replace(/_\{([^}]+)\}/g, "_$1");
+
+  // Dọn dẹp khoảng trắng thừa
+  res = res.replace(/\\/g, "").replace(/\s+/g, " ").trim();
+
+  return res;
 }
 
 const THEME_STYLES: Record<string, {
@@ -322,7 +418,7 @@ export async function generatePptxBlob(deck: SlideDeck): Promise<Blob> {
             h: 0.6,
             fill: { color: "10B981" },
           });
-          slide.addText(`✅ Đáp án đúng: ${q.answer} - ${cleanLatexForPptx(q.explanation || "")}`, {
+          slide.addText(`✅ Đáp án: ${q.answer} - ${cleanLatexForPptx(q.explanation || "")}`, {
             x: 1.0,
             y: 4.45,
             w: 8.0,
@@ -330,6 +426,68 @@ export async function generatePptxBlob(deck: SlideDeck): Promise<Blob> {
             fontSize: 11,
             bold: true,
             color: "FFFFFF",
+          });
+        }
+      } else if (s.layout === "summary") {
+        // BỐ CỤC TỔNG KẾT & GHI NHỚ CUỐI BÀI
+        const sum = s.content.summary;
+        const keyPoints = sum?.keyPoints || s.content.bullets || [];
+
+        const bulletTexts = keyPoints.map((k) => ({
+          text: cleanLatexForPptx(k),
+          options: { bullet: true, fontSize: 13, color: theme.textColor },
+        }));
+
+        if (bulletTexts.length > 0) {
+          slide.addText(bulletTexts, {
+            x: 0.8,
+            y: 1.3,
+            w: sum?.formulas || sum?.homework ? 4.3 : 8.4,
+            h: 3.2,
+            lineSpacing: 20,
+          });
+        }
+
+        // Cột phải hoặc khối dưới: Công thức cần nhớ & Dặn dò
+        if (sum?.formulas && sum.formulas.length > 0) {
+          slide.addShape(pres.ShapeType.roundRect, {
+            x: 5.3,
+            y: 1.3,
+            w: 3.9,
+            h: 1.7,
+            fill: { color: theme.accentBg },
+            line: { color: theme.accentBorder, width: 1 },
+          });
+
+          const fText = sum.formulas.map((f) => cleanLatexForPptx(f)).join("\n");
+          slide.addText(`📌 Công thức trọng tâm:\n${fText}`, {
+            x: 5.5,
+            y: 1.4,
+            w: 3.5,
+            h: 1.5,
+            fontSize: 12,
+            bold: true,
+            color: theme.accentText,
+          });
+        }
+
+        if (sum?.homework) {
+          slide.addShape(pres.ShapeType.roundRect, {
+            x: 5.3,
+            y: 3.2,
+            w: 3.9,
+            h: 1.4,
+            fill: { color: "FEF3C7" },
+            line: { color: "F59E0B", width: 1 },
+          });
+
+          slide.addText(`📝 Nhiệm vụ về nhà:\n${cleanLatexForPptx(sum.homework)}`, {
+            x: 5.5,
+            y: 3.3,
+            w: 3.5,
+            h: 1.2,
+            fontSize: 11,
+            color: "92400E",
           });
         }
       } else {

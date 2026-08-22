@@ -4,7 +4,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { generateSlideDeckAction, refineSlideDeckAction } from "@/app/actions/slides";
 import { SlideDeck, SlideItem, generatePptxBlob } from "@/lib/pptx-export";
 import { MathText } from "@/components/KatexFormula";
-import { GRADE_OPTIONS } from "@/lib/constants";
 import {
   Sparkles,
   Presentation,
@@ -32,14 +31,16 @@ import {
   Layers,
   MessageSquare,
   Sparkle,
+  Sliders,
+  CheckSquare,
 } from "lucide-react";
 
 const QUICK_PROMPTS = [
-  "Soạn slide bài giảng 6 trang về Phản ứng hóa học & Định luật bảo toàn khối lượng (Khối 8)",
-  "Tạo bài giảng về Mol, Khối lượng mol và Thể tích mol chất khí (Khối 8)",
+  "Soạn slide bài giảng 8 trang về Phản ứng hóa học & Định luật bảo toàn khối lượng (Khối 8)",
+  "Tạo bài giảng 10 trang về Mol, Khối lượng mol, Thể tích mol và Tính toán hóa học (Khối 8)",
   "Soạn slide KHTN 6: Oxygen và Không khí - Vai trò đối với sự sống",
-  "Tạo bài giảng về Axit, Bazơ, Muối và Thang đo pH (Khối 8)",
-  "Soạn slide Khối 9: Kim loại và Dãy hoạt động hóa học của kim loại",
+  "Tạo bài giảng 8 trang về Dung dịch, Nồng độ phần trăm C% và Nồng độ mol CM (Khối 8)",
+  "Soạn slide Khối 9: Axit, Bazơ, Muối và Dãy hoạt động hóa học của kim loại",
 ];
 
 const THEMES = [
@@ -56,12 +57,12 @@ export default function AISlideStudioPage() {
     {
       role: "assistant",
       content:
-        "Xin chào Thầy/Cô! Tôi là Trợ Lý AI Soạn Bài Giảng & Slide PowerPoint của ChemClass LMS.\n\nThầy/Cô hãy nhập chủ đề bài học, tải lên tài liệu/giáo án tham khảo hoặc chọn gợi ý bên dưới để tôi bắt đầu thiết kế bộ slide trực quan nhé!",
+        "Xin chào Thầy/Cô! Tôi là Trợ Lý AI Soạn Bài Giảng & Slide PowerPoint của ChemClass LMS.\n\nThầy/Cô hãy nhập chủ đề bài học (tự do chọn số lượng từ 3 đến 25 slide), tải lên tài liệu/giáo án tham khảo hoặc chọn gợi ý bên dưới để tôi bắt đầu thiết kế bộ slide hoàn chỉnh (đầy đủ slide bài học, câu hỏi củng cố ôn tập và slide tổng kết/dặn dò) nhé!",
     },
   ]);
   const [inputText, setInputText] = useState("");
   const [selectedGrade, setSelectedGrade] = useState("8");
-  const [slideCount, setSlideCount] = useState(6);
+  const [slideCount, setSlideCount] = useState<number>(8);
   const [isGenerating, setIsGenerating] = useState(false);
 
   // Document attachment state
@@ -99,7 +100,6 @@ export default function AISlideStudioPage() {
       };
       reader.readAsDataURL(file);
     } else {
-      // Đọc file text / markdown
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
@@ -131,7 +131,7 @@ export default function AISlideStudioPage() {
       const res = await generateSlideDeckAction({
         topic: textToSend,
         grade: selectedGrade,
-        slideCount,
+        slideCount: Math.min(25, Math.max(3, slideCount)),
         documentText: attachedDocText,
         documentImagesBase64: attachedDocImages,
         theme: selectedTheme,
@@ -216,10 +216,10 @@ export default function AISlideStudioPage() {
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Presentation className="w-6 h-6 text-cyan-400" />
-            AI Soạn Bài Giảng & Slide PowerPoint
+            AI Soạn Bài Giảng & Slide PowerPoint (Tối Đa 25 Slide)
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Trò chuyện với AI, đọc tài liệu tham khảo, xem trước slide 16:9 và xuất file PowerPoint (.pptx)
+            Trò chuyện với AI, đọc tài liệu tham khảo, có sẵn câu hỏi ôn tập & tổng kết, xuất PowerPoint (.pptx) chuẩn đẹp
           </p>
         </div>
 
@@ -263,7 +263,7 @@ export default function AISlideStudioPage() {
         {/* CỘT TRÁI (5 Cols): KHUNG CHAT & TÀI LIỆU THAM KHẢO */}
         <div className="lg:col-span-5 flex flex-col rounded-3xl bg-slate-900/80 border border-white/10 backdrop-blur-xl shadow-2xl overflow-hidden h-[680px]">
           {/* Chat Header */}
-          <div className="p-3.5 bg-slate-950/80 border-b border-white/10 flex items-center justify-between">
+          <div className="p-3.5 bg-slate-950/80 border-b border-white/10 flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold">
                 <Bot className="w-4 h-4" />
@@ -272,34 +272,60 @@ export default function AISlideStudioPage() {
                 <span className="text-xs font-bold text-white block">Trợ Lý Thiết Kế Slide AI</span>
                 <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Gemini 3.6 Flash Sẵn Sàng
+                  Gemini 3.6 Flash
                 </span>
               </div>
             </div>
 
-            {/* Khối lớp & Số lượng slide */}
-            <div className="flex items-center gap-1.5 text-[11px]">
-              <select
-                value={selectedGrade}
-                onChange={(e) => setSelectedGrade(e.target.value)}
-                className="px-2 py-1 rounded-xl bg-slate-800 border border-white/10 text-white text-[11px] focus:outline-none"
-              >
-                <option value="6">Khối 6</option>
-                <option value="7">Khối 7</option>
-                <option value="8">Khối 8</option>
-                <option value="9">Khối 9</option>
-              </select>
+            {/* Khối lớp & Ô TỰ GÕ SỐ LƯỢNG SLIDE (3 -> 25) */}
+            <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-slate-400">Khối:</span>
+                <select
+                  value={selectedGrade}
+                  onChange={(e) => setSelectedGrade(e.target.value)}
+                  className="px-2 py-1 rounded-xl bg-slate-800 border border-white/10 text-white text-[11px] font-bold focus:outline-none"
+                >
+                  <option value="6">Khối 6</option>
+                  <option value="7">Khối 7</option>
+                  <option value="8">Khối 8</option>
+                  <option value="9">Khối 9</option>
+                </select>
+              </div>
 
-              <select
-                value={slideCount}
-                onChange={(e) => setSlideCount(Number(e.target.value))}
-                className="px-2 py-1 rounded-xl bg-slate-800 border border-white/10 text-white text-[11px] focus:outline-none"
-              >
-                <option value={5}>5 Slide</option>
-                <option value={6}>6 Slide</option>
-                <option value={8}>8 Slide</option>
-                <option value={10}>10 Slide</option>
-              </select>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-slate-400">Số slide:</span>
+                <input
+                  type="number"
+                  min={3}
+                  max={25}
+                  value={slideCount}
+                  onChange={(e) => setSlideCount(Math.min(25, Math.max(1, Number(e.target.value) || 1)))}
+                  className="w-12 px-1.5 py-1 rounded-xl bg-slate-800 border border-white/10 text-cyan-300 font-bold text-center text-xs focus:ring-1 focus:ring-cyan-500 focus:outline-none"
+                  title="Tự gõ số lượng slide mong muốn (tối đa 25 slide)"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Phím bấm nhanh số lượng slide */}
+          <div className="px-3.5 py-1.5 bg-slate-950/40 border-b border-white/5 flex items-center justify-between text-[11px] text-slate-400">
+            <span className="text-[10px]">Chọn nhanh số slide:</span>
+            <div className="flex items-center gap-1">
+              {[5, 8, 10, 12, 15, 20, 25].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setSlideCount(num)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${
+                    slideCount === num
+                      ? "bg-cyan-400 text-slate-950"
+                      : "bg-slate-800 text-slate-400 hover:text-white"
+                  }`}
+                >
+                  {num}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -335,7 +361,7 @@ export default function AISlideStudioPage() {
             {isGenerating && (
               <div className="flex items-center gap-2 text-xs text-cyan-400 p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 animate-pulse">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>AI đang đọc tài liệu & thiết kế bài giảng...</span>
+                <span>AI đang đọc tài liệu, tính toán công thức & thiết kế {slideCount} slide...</span>
               </div>
             )}
 
@@ -361,7 +387,7 @@ export default function AISlideStudioPage() {
             </div>
           )}
 
-          {/* Document Attachment Pill (Nếu có tải tài liệu) */}
+          {/* Document Attachment Pill */}
           {attachedDocName && (
             <div className="px-4 py-2 bg-indigo-950/60 border-t border-indigo-500/30 flex items-center justify-between text-xs text-cyan-300">
               <div className="flex items-center gap-2 truncate">
@@ -413,8 +439,8 @@ export default function AISlideStudioPage() {
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder={
                   slideDeck
-                    ? "Feedback điều chỉnh: 'Sửa slide 2 ngắn gọn hơn', 'Thêm ví dụ vào slide 3'..."
-                    : "Nhập tên bài học hoặc yêu cầu slide bài giảng..."
+                    ? "Feedback: 'Thêm ví dụ vào slide 3', 'Đổi thứ tự câu hỏi ở slide quiz'..."
+                    : "Nhập tên bài học hoặc yêu cầu tạo slide bài giảng..."
                 }
                 className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-900 border border-white/10 text-white placeholder-slate-500 text-xs focus:ring-2 focus:ring-cyan-500 focus:outline-none"
               />
@@ -440,7 +466,7 @@ export default function AISlideStudioPage() {
               <div>
                 <h3 className="text-base font-bold text-white">Khung Xem Trước Slide Thuyết Trình 16:9</h3>
                 <p className="text-xs text-slate-400 max-w-sm mt-1">
-                  Hãy gửi yêu cầu hoặc chọn chủ đề ở khung chat bên trái để AI tự động thiết kế bộ slide trình chiếu tuyệt đẹp!
+                  Hãy gửi yêu cầu hoặc chọn chủ đề ở khung chat bên trái để AI tự động thiết kế bộ slide trình chiếu tuyệt đẹp (tối đa 25 slide)!
                 </p>
               </div>
             </div>
@@ -453,7 +479,7 @@ export default function AISlideStudioPage() {
                     {slideDeck.topic} (Khối {slideDeck.grade})
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-bold">
-                    {currentSlideIndex + 1} / {slideDeck.slides.length}
+                    Slide {currentSlideIndex + 1} / {slideDeck.slides.length}
                   </span>
                 </div>
 
@@ -581,7 +607,7 @@ export default function AISlideStudioPage() {
                             </div>
                           )}
 
-                          {/* Quiz Layout */}
+                          {/* Quiz Layout (Câu hỏi củng cố ôn tập) */}
                           {currentSlide.layout === "quiz" && currentSlide.content.quiz && (
                             <div className="space-y-3">
                               <div className="p-4 rounded-2xl bg-cyan-950/60 border border-cyan-500/30 text-white font-bold text-sm">
@@ -597,11 +623,65 @@ export default function AISlideStudioPage() {
                                   </div>
                                 ))}
                               </div>
+                              {currentSlide.content.quiz.answer && (
+                                <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs">
+                                  <strong>✅ Đáp án: </strong>
+                                  <MathText text={`${currentSlide.content.quiz.answer} - ${currentSlide.content.quiz.explanation || ""}`} />
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Summary Layout (Tổng kết & Dặn dò về nhà) */}
+                          {currentSlide.layout === "summary" && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              {/* Cột trái: Điểm cốt lõi */}
+                              <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/5 space-y-2">
+                                <h4 className="font-bold text-cyan-300 flex items-center gap-1.5">
+                                  <CheckSquare className="w-4 h-4" />
+                                  <span>Kiến Thức Cốt Lõi:</span>
+                                </h4>
+                                <ul className="space-y-1.5 text-slate-200">
+                                  {(currentSlide.content.summary?.keyPoints || currentSlide.content.bullets || []).map((k, kIdx) => (
+                                    <li key={kIdx} className="flex items-start gap-2">
+                                      <span className="text-cyan-400 mt-0.5">✔</span>
+                                      <MathText text={k} />
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+
+                              {/* Cột phải: Công thức trọng tâm & Dặn dò */}
+                              <div className="space-y-3">
+                                {currentSlide.content.summary?.formulas && currentSlide.content.summary.formulas.length > 0 && (
+                                  <div className="p-3.5 rounded-2xl bg-indigo-950/60 border border-indigo-500/30 space-y-1">
+                                    <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider block">
+                                      📌 Công Thức Trọng Tâm Cần Nhớ:
+                                    </span>
+                                    <div className="space-y-1 text-xs text-white font-semibold">
+                                      {currentSlide.content.summary.formulas.map((f, fIdx) => (
+                                        <div key={fIdx} className="pl-1">
+                                          <MathText text={f} />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {currentSlide.content.summary?.homework && (
+                                  <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/30 text-amber-200 text-xs space-y-0.5">
+                                    <span className="font-bold text-amber-300 block">📝 Nhiệm Vụ Về Nhà:</span>
+                                    <p className="text-slate-300">
+                                      <MathText text={currentSlide.content.summary.homework} />
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
 
                           {/* Bullets List */}
-                          {currentSlide.content.bullets && currentSlide.content.bullets.length > 0 && (
+                          {currentSlide.layout !== "summary" && currentSlide.content.bullets && currentSlide.content.bullets.length > 0 && (
                             <ul className="space-y-2 text-slate-200">
                               {currentSlide.content.bullets.map((b, bIdx) => (
                                 <li key={bIdx} className="flex items-start gap-2.5">
@@ -615,7 +695,7 @@ export default function AISlideStudioPage() {
                           )}
 
                           {/* Chemical Equations Box */}
-                          {currentSlide.content.chemicalEquations &&
+                          {currentSlide.layout !== "summary" && currentSlide.content.chemicalEquations &&
                             currentSlide.content.chemicalEquations.length > 0 && (
                               <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-cyan-500/30 space-y-1.5 shadow-inner">
                                 <span className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider block">
@@ -632,7 +712,7 @@ export default function AISlideStudioPage() {
                             )}
 
                           {/* Highlight Rule Box */}
-                          {currentSlide.content.highlightBox && (
+                          {currentSlide.layout !== "summary" && currentSlide.content.highlightBox && (
                             <div className="p-3.5 rounded-2xl bg-indigo-950/60 border border-indigo-500/30 space-y-1 shadow-inner">
                               <span className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider block">
                                 💡 {currentSlide.content.highlightBox.title}:
