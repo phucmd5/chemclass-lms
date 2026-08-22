@@ -16,6 +16,7 @@ import {
   GraduationCap,
   CreditCard,
   CheckCircle2,
+  Presentation,
 } from "lucide-react";
 
 export default async function TeacherDashboardPage() {
@@ -60,6 +61,13 @@ export default async function TeacherDashboardPage() {
             >
               <CreditCard className="w-4 h-4" />
               <span>Quản lý Học phí</span>
+            </Link>
+            <Link
+              href="/dashboard/slides"
+              className="px-4 py-2.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-sm font-semibold flex items-center gap-2 transition-all shadow-lg shadow-cyan-500/10"
+            >
+              <Presentation className="w-4 h-4 text-cyan-400" />
+              <span>Slide Bài Giảng AI</span>
             </Link>
             <Link
               href="/dashboard/exams"

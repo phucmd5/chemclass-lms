@@ -13,6 +13,7 @@ import {
   FileCheck,
   LogOut,
   GraduationCap,
+  Presentation,
 } from "lucide-react";
 
 export default async function DashboardLayout({
@@ -35,9 +36,10 @@ export default async function DashboardLayout({
     { href: "/dashboard", label: "Tổng quan", icon: LayoutDashboard },
     { href: "/dashboard/classes", label: "Lớp học & Học sinh", icon: Users },
     { href: "/dashboard/schedules", label: "Thời khóa biểu", icon: Calendar },
-    { href: "/dashboard/tuition", label: "Quản lý Học phí", icon: CreditCard },
+    { href: "/dashboard/slides", label: "Slide Bài Giảng AI", icon: Presentation },
     { href: "/dashboard/exams", label: "Soạn đề AI (Hoá học)", icon: Sparkles },
     { href: "/dashboard/submissions", label: "Bài thi & Giám sát", icon: FileCheck },
+    { href: "/dashboard/tuition", label: "Quản lý Học phí", icon: CreditCard },
   ];
 
   return (
