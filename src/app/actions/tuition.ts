@@ -42,7 +42,7 @@ export async function getTeacherTuitionData(filterMonth?: string, filterClassId?
     };
   }
 
-  // 2. Truy vấn hóa đơn học phí
+  // 2. Truy vấn hóa đơn học phí (an toàn, không query cột chưa tồn tại)
   let query = adminClient
     .from("tuition_invoices")
     .select(`
@@ -66,7 +66,7 @@ export async function getTeacherTuitionData(filterMonth?: string, filterClassId?
         full_name,
         student_code,
         phone,
-        contact_email
+        email
       )
     `)
     .in("class_id", classIds)
