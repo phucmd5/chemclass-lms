@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateChemistryExamQuestions } from "@/lib/gemini";
-import { encodeExamTitle, parseExamTitle } from "@/lib/exam-utils";
+import { encodeExamTitle, parseExamTitle, ExamConfig } from "@/lib/exam-utils";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -27,7 +27,7 @@ export async function generateAIExamQuestionsAction(payload: {
 }
 
 /**
- * Lưu đề thi kèm danh sách câu hỏi vào cơ sở dữ liệu (hỗ trợ allowRetake)
+ * Lưu đề thi kèm danh sách câu hỏi vào cơ sở dữ liệu (hỗ trợ allowRetake, shuffleQuestions, allowViewAnswers)
  */
 export async function saveExamWithQuestions(payload: {
   examId?: string;
@@ -37,6 +37,8 @@ export async function saveExamWithQuestions(payload: {
   totalPoints?: number;
   isPublished?: boolean;
   allowRetake?: boolean;
+  shuffleQuestions?: boolean;
+  allowViewAnswers?: boolean;
   questions: Array<{
     type: string;
     content_latex: string;
@@ -54,6 +56,8 @@ export async function saveExamWithQuestions(payload: {
     totalPoints = 10,
     isPublished = true,
     allowRetake = false,
+    shuffleQuestions = true,
+    allowViewAnswers = true,
     questions,
   } = payload;
 
@@ -67,7 +71,11 @@ export async function saveExamWithQuestions(payload: {
   if (!user) return { error: "Bạn chưa đăng nhập!" };
 
   const adminClient = createAdminClient();
-  const encodedTitle = encodeExamTitle(title, allowRetake);
+  const encodedTitle = encodeExamTitle(title, {
+    allowRetake,
+    shuffleQuestions,
+    allowViewAnswers,
+  });
 
   let targetExamId = examId;
 
@@ -141,7 +149,7 @@ export async function saveExamWithQuestions(payload: {
 }
 
 /**
- * Lấy danh sách toàn bộ đề thi của Giáo viên
+ * Lấy danh sách toàn bộ đề thi của Giáo viên kèm cấu hình
  */
 export async function getTeacherExams() {
   const supabase = await createClient();
@@ -179,11 +187,13 @@ export async function getTeacherExams() {
   }
 
   return (exams || []).map((ex: any) => {
-    const { title: cleanTitle, allowRetake } = parseExamTitle(ex.title, ex.allow_retake);
+    const config = parseExamTitle(ex.title, ex.allow_retake);
     return {
       ...ex,
-      title: cleanTitle,
-      allow_retake: allowRetake,
+      title: config.title,
+      allow_retake: config.allowRetake,
+      shuffle_questions: config.shuffleQuestions,
+      allow_view_answers: config.allowViewAnswers,
       classes: Array.isArray(ex.classes) ? ex.classes[0] : ex.classes,
       questionCount: ex.questions?.length || 0,
       submissionCount: ex.exam_submissions?.length || 0,
@@ -237,12 +247,14 @@ export async function getExamWithQuestions(examId: string) {
     }
   }
 
-  const { title: cleanTitle, allowRetake } = parseExamTitle(exam.title, exam.allow_retake);
+  const config = parseExamTitle(exam.title, exam.allow_retake);
 
   return {
     ...exam,
-    title: cleanTitle,
-    allow_retake: allowRetake,
+    title: config.title,
+    allow_retake: config.allowRetake,
+    shuffle_questions: config.shuffleQuestions,
+    allow_view_answers: config.allowViewAnswers,
     classes: Array.isArray(exam.classes) ? exam.classes[0] : exam.classes,
     questions: questions || [],
     mySubmission,
@@ -256,31 +268,66 @@ export async function toggleExamAllowRetake(examId: string, currentAllowRetake: 
   if (!examId) return { error: "Thiếu ID đề thi!" };
 
   const adminClient = createAdminClient();
-
-  const { data: exam } = await adminClient
-    .from("exams")
-    .select("title")
-    .eq("id", examId)
-    .single();
-
+  const { data: exam } = await adminClient.from("exams").select("title").eq("id", examId).single();
   if (!exam) return { error: "Không tìm thấy đề thi!" };
 
-  const newAllowRetake = !currentAllowRetake;
-  const newTitle = encodeExamTitle(exam.title, newAllowRetake);
+  const config = parseExamTitle(exam.title);
+  config.allowRetake = !currentAllowRetake;
+  const newTitle = encodeExamTitle(config.title, config);
 
-  const { error } = await adminClient
-    .from("exams")
-    .update({ title: newTitle })
-    .eq("id", examId);
-
-  if (error) {
-    return { error: `Lỗi cập nhật quyền làm lại: ${error.message}` };
-  }
+  const { error } = await adminClient.from("exams").update({ title: newTitle }).eq("id", examId);
+  if (error) return { error: `Lỗi cập nhật quyền làm lại: ${error.message}` };
 
   revalidatePath("/dashboard/exams");
   revalidatePath("/student/exams");
   revalidatePath(`/student/exams/${examId}`);
-  return { success: true, allowRetake: newAllowRetake };
+  return { success: true, allowRetake: config.allowRetake };
+}
+
+/**
+ * Bật / Tắt chức năng đảo đề thi (1 Chạm)
+ */
+export async function toggleExamShuffle(examId: string, currentShuffle: boolean) {
+  if (!examId) return { error: "Thiếu ID đề thi!" };
+
+  const adminClient = createAdminClient();
+  const { data: exam } = await adminClient.from("exams").select("title").eq("id", examId).single();
+  if (!exam) return { error: "Không tìm thấy đề thi!" };
+
+  const config = parseExamTitle(exam.title);
+  config.shuffleQuestions = !currentShuffle;
+  const newTitle = encodeExamTitle(config.title, config);
+
+  const { error } = await adminClient.from("exams").update({ title: newTitle }).eq("id", examId);
+  if (error) return { error: `Lỗi cập nhật đảo đề: ${error.message}` };
+
+  revalidatePath("/dashboard/exams");
+  revalidatePath("/student/exams");
+  revalidatePath(`/student/exams/${examId}`);
+  return { success: true, shuffleQuestions: config.shuffleQuestions };
+}
+
+/**
+ * Bật / Tắt quyền cho phép học sinh xem đáp án & lời giải sau khi nộp bài (1 Chạm)
+ */
+export async function toggleExamViewAnswers(examId: string, currentViewAnswers: boolean) {
+  if (!examId) return { error: "Thiếu ID đề thi!" };
+
+  const adminClient = createAdminClient();
+  const { data: exam } = await adminClient.from("exams").select("title").eq("id", examId).single();
+  if (!exam) return { error: "Không tìm thấy đề thi!" };
+
+  const config = parseExamTitle(exam.title);
+  config.allowViewAnswers = !currentViewAnswers;
+  const newTitle = encodeExamTitle(config.title, config);
+
+  const { error } = await adminClient.from("exams").update({ title: newTitle }).eq("id", examId);
+  if (error) return { error: `Lỗi cập nhật hiển thị đáp án: ${error.message}` };
+
+  revalidatePath("/dashboard/exams");
+  revalidatePath("/student/exams");
+  revalidatePath(`/student/exams/${examId}`);
+  return { success: true, allowViewAnswers: config.allowViewAnswers };
 }
 
 /**
@@ -389,12 +436,14 @@ export async function getStudentExams() {
         (sub: any) => sub.student_id === user.id
       );
       const latestSub = userSubmissions[0] || null;
-      const { title: cleanTitle, allowRetake } = parseExamTitle(ex.title, ex.allow_retake);
+      const config = parseExamTitle(ex.title, ex.allow_retake);
 
       return {
         ...ex,
-        title: cleanTitle,
-        allow_retake: allowRetake,
+        title: config.title,
+        allow_retake: config.allowRetake,
+        shuffle_questions: config.shuffleQuestions,
+        allow_view_answers: config.allowViewAnswers,
         classes: Array.isArray(ex.classes) ? ex.classes[0] : ex.classes,
         questionCount: ex.questions?.length || 0,
         mySubmission: latestSub,

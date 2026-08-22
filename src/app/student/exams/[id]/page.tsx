@@ -4,6 +4,7 @@ import React, { useState, useEffect, use, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getExamWithQuestions, submitStudentExam, resetStudentSubmission } from "@/app/actions/exams";
+import { shuffleArray } from "@/lib/exam-utils";
 import { MathText } from "@/components/KatexFormula";
 import {
   Sparkles,
@@ -24,6 +25,8 @@ import {
   RotateCcw,
   Volume2,
   Lock,
+  EyeOff,
+  Shuffle,
 } from "lucide-react";
 
 export default function ExamTakingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +34,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   const router = useRouter();
 
   const [exam, setExam] = useState<any | null>(null);
+  const [displayedQuestions, setDisplayedQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Exam taking state
@@ -46,13 +50,13 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   const [blurEventsLog, setBlurEventsLog] = useState<Array<{ time: string; event: string }>>([]);
   const [proctorWarning, setProctorWarning] = useState<string | null>(null);
 
-  // Refs để luôn lưu trữ giá trị mới nhất (tránh lỗi stale closure của React)
+  // Refs
   const tabSwitchCountRef = useRef<number>(0);
   const blurEventsLogRef = useRef<Array<{ time: string; event: string }>>([]);
   const lastSwitchTimeRef = useRef<number>(0);
   const isFinishedRef = useRef<boolean>(false);
 
-  // Phát âm thanh cảnh báo khi phát hiện rời tab
+  // Phát âm thanh cảnh báo khi rời tab
   function playWarningTone() {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -61,7 +65,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // 880 Hz
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
       gain.gain.setValueAtTime(0.4, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
       osc.connect(gain);
@@ -71,13 +75,15 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     } catch {}
   }
 
-  // Tải thông tin đề thi
+  // Tải thông tin đề thi & xử lý đảo đề nếu có
   async function loadExam() {
     setLoading(true);
     const data = await getExamWithQuestions(examId);
     setExam(data);
 
     if (data) {
+      const rawQuestions = data.questions || [];
+
       // Nếu học sinh đã nộp bài trước đó
       if (data.mySubmission) {
         setSubmissionResult({
@@ -91,9 +97,31 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
         tabSwitchCountRef.current = data.mySubmission.tab_switch_count || 0;
         blurEventsLogRef.current = data.mySubmission.blur_events_log || [];
         isFinishedRef.current = true;
+        setDisplayedQuestions(rawQuestions);
       } else {
         isFinishedRef.current = false;
-        // Khôi phục câu trả lời đã lưu từ localStorage (nếu có)
+
+        // Xử lý đảo đề: Nếu bật shuffle_questions -> đảo ngẫu nhiên thứ tự câu hỏi
+        let qList = [...rawQuestions];
+        if (data.shuffle_questions) {
+          // Khôi phục thứ tự đã đảo nếu có trong localStorage, hoặc tạo thứ tự đảo mới
+          const savedOrder = localStorage.getItem(`chemclass_exam_${examId}_order`);
+          if (savedOrder) {
+            try {
+              const orderIds: string[] = JSON.parse(savedOrder);
+              qList.sort((a, b) => orderIds.indexOf(a.id) - orderIds.indexOf(b.id));
+            } catch {
+              qList = shuffleArray(rawQuestions);
+              localStorage.setItem(`chemclass_exam_${examId}_order`, JSON.stringify(qList.map((q) => q.id)));
+            }
+          } else {
+            qList = shuffleArray(rawQuestions);
+            localStorage.setItem(`chemclass_exam_${examId}_order`, JSON.stringify(qList.map((q) => q.id)));
+          }
+        }
+        setDisplayedQuestions(qList);
+
+        // Khôi phục câu trả lời đã lưu
         const savedAnswers = localStorage.getItem(`chemclass_exam_${examId}_answers`);
         if (savedAnswers) {
           try {
@@ -101,7 +129,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           } catch {}
         }
 
-        // Khôi phục số lần rời tab từ localStorage nếu có
+        // Khôi phục số lần rời tab
         const savedProctor = localStorage.getItem(`chemclass_exam_${examId}_proctor`);
         if (savedProctor) {
           try {
@@ -113,7 +141,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           } catch {}
         }
 
-        // Khởi tạo thời gian làm bài
         const durationSec = (data.duration_minutes || 45) * 60;
         setTimeLeft(durationSec);
       }
@@ -125,12 +152,11 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     loadExam();
   }, [examId]);
 
-  // Hàm ghi nhận sự kiện rời khỏi màn hình thi (Chống debounce)
+  // Ghi nhận sự kiện rời khỏi màn hình thi
   const recordTabSwitch = useCallback((eventType: string) => {
     if (isFinishedRef.current) return;
 
     const now = Date.now();
-    // Tránh tính trùng khi visibilitychange và blur cùng kích hoạt trong 600ms
     if (now - lastSwitchTimeRef.current < 600) {
       return;
     }
@@ -155,7 +181,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     blurEventsLogRef.current = [...blurEventsLogRef.current, newLogItem];
     setBlurEventsLog(blurEventsLogRef.current);
 
-    // Lưu vào localStorage chống mất dữ liệu khi F5
     localStorage.setItem(
       `chemclass_exam_${examId}_proctor`,
       JSON.stringify({
@@ -164,16 +189,13 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
       })
     );
 
-    // Phát âm thanh cảnh báo
     playWarningTone();
-
-    // Bật cảnh báo nổi bật trên màn hình
     setProctorWarning(
       `⚠️ CẢNH BÁO GIAN LẬN: Bạn vừa rời khỏi màn hình làm bài (Lần thứ ${newCount})! Sự việc đã được ghi nhận vào hệ thống.`
     );
   }, [examId]);
 
-  // Lắng nghe sự kiện chuyển Tab / Rời cửa sổ (Soft Proctoring)
+  // Lắng nghe sự kiện chuyển Tab / Rời cửa sổ
   useEffect(() => {
     if (!exam || submissionResult) return;
 
@@ -196,7 +218,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     };
   }, [exam, submissionResult, recordTabSwitch]);
 
-  // Bộ đếm ngược thời gian
+  // Đếm ngược thời gian
   useEffect(() => {
     if (!exam || submissionResult || timeLeft <= 0) return;
 
@@ -214,7 +236,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     return () => clearInterval(timer);
   }, [exam, submissionResult, timeLeft]);
 
-  // Chọn đáp án
   function handleSelectOption(questionId: string, optionKey: string) {
     if (submissionResult) return;
 
@@ -223,13 +244,11 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     localStorage.setItem(`chemclass_exam_${examId}_answers`, JSON.stringify(updated));
   }
 
-  // Tự động nộp bài khi hết giờ
   async function handleAutoSubmit() {
     alert("⏰ Đã hết thời gian làm bài! Hệ thống sẽ tự động nộp bài của bạn.");
     await submitAnswers();
   }
 
-  // Thực hiện nộp bài
   async function submitAnswers() {
     setIsSubmitting(true);
     setShowConfirmModal(false);
@@ -250,10 +269,10 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
       setSubmissionResult(res);
       localStorage.removeItem(`chemclass_exam_${examId}_answers`);
       localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
+      localStorage.removeItem(`chemclass_exam_${examId}_order`);
     }
   }
 
-  // Làm lại bài thi (Nếu được giáo viên cho phép)
   async function handleRetakeExam() {
     if (!exam?.allow_retake) {
       alert("Giáo viên không cho phép làm lại đề thi này!");
@@ -273,6 +292,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
 
     localStorage.removeItem(`chemclass_exam_${examId}_answers`);
     localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
+    localStorage.removeItem(`chemclass_exam_${examId}_order`);
 
     setSubmissionResult(null);
     setAnswers({});
@@ -283,14 +303,11 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     blurEventsLogRef.current = [];
     isFinishedRef.current = false;
 
-    if (exam) {
-      setTimeLeft((exam.duration_minutes || 45) * 60);
-    }
-
+    // Tải lại đề thi và đảo lại thứ tự mới
+    await loadExam();
     setIsRetaking(false);
   }
 
-  // Định dạng thời gian MM:SS
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -318,8 +335,9 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     );
   }
 
-  const questions = exam.questions || [];
+  const questions = displayedQuestions;
   const answeredCount = Object.keys(answers).length;
+  const allowViewAnswers = exam.allow_view_answers !== false;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-slate-100 py-6 px-4 sm:px-6">
@@ -352,9 +370,16 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
             </Link>
 
             <div>
-              <h1 className="text-sm font-bold text-white truncate max-w-[200px] sm:max-w-sm">
-                {exam.title}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-sm font-bold text-white truncate max-w-[200px] sm:max-w-sm">
+                  {exam.title}
+                </h1>
+                {exam.shuffle_questions && !submissionResult && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-0.5" title="Đề thi đã được tự động đảo thứ tự câu hỏi">
+                    <Shuffle className="w-3 h-3" /> Đảo đề
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] text-slate-400">
                 Đã làm: <strong className="text-cyan-300">{answeredCount}/{questions.length}</strong> câu
               </p>
@@ -362,7 +387,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {/* HUY HIỆU GIÁM SÁT RỜI TAB THỜI GIAN THỰC (LIVE PROCTORING BADGE) */}
+            {/* HUY HIỆU GIÁM SÁT RỜI TAB THỜI GIAN THỰC */}
             {tabSwitchCount === 0 ? (
               <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 shadow-sm">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
@@ -422,7 +447,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        {/* KHUNG GIÁM SÁT GIAN LẬN TRỰC TIẾP TRÊN MÀN HÌNH LÀM BÀI */}
+        {/* KHUNG GIÁM SÁT GIAN LẬN TRỰC TIẾP */}
         {!submissionResult && (
           <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2.5">
@@ -440,7 +465,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
 
-            {/* Nút bấm giả lập test rời tab */}
             <button
               type="button"
               onClick={() => recordTabSwitch("test")}
@@ -467,7 +491,9 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                 {submissionResult.score} / {submissionResult.totalPoints} Điểm
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Hệ thống đã tự động chấm điểm. Hãy xem lại đáp án và lời giải chi tiết từng câu ở bên dưới!
+                {allowViewAnswers
+                  ? "Hệ thống đã tự động chấm điểm. Hãy xem lại đáp án và lời giải chi tiết từng câu ở bên dưới!"
+                  : "Hệ thống đã ghi nhận kết quả bài làm của bạn."}
               </p>
             </div>
 
@@ -487,6 +513,14 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                 </span>
               )}
             </div>
+
+            {/* Thông báo quyền xem đáp án nếu bị khóa */}
+            {!allowViewAnswers && (
+              <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-center gap-2">
+                <EyeOff className="w-4 h-4" />
+                <span>Giáo viên đã khóa hiển thị đáp án và lời giải chi tiết cho đề thi này (Chống lộ đề).</span>
+              </div>
+            )}
 
             {/* Quyền làm lại bài thi */}
             <div className="pt-2">
@@ -527,7 +561,8 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                     Câu {idx + 1} ({q.points || 1} điểm)
                   </span>
 
-                  {submissionResult && (
+                  {/* Chỉ hiển thị đúng/sai nếu được phép xem đáp án */}
+                  {submissionResult && allowViewAnswers && (
                     <span
                       className={`text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
                         isCorrect
@@ -556,12 +591,19 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                       let btnStyle = "bg-slate-950/60 border-white/10 text-slate-300 hover:border-cyan-500/40";
 
                       if (submissionResult) {
-                        if (isOptionCorrect) {
-                          btnStyle = "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-bold";
-                        } else if (isSelected && !isOptionCorrect) {
-                          btnStyle = "bg-rose-500/20 border-rose-500/60 text-rose-300";
+                        if (allowViewAnswers) {
+                          if (isOptionCorrect) {
+                            btnStyle = "bg-emerald-500/20 border-emerald-500/60 text-emerald-300 font-bold";
+                          } else if (isSelected && !isOptionCorrect) {
+                            btnStyle = "bg-rose-500/20 border-rose-500/60 text-rose-300";
+                          } else {
+                            btnStyle = "bg-slate-950/40 border-white/5 text-slate-500";
+                          }
                         } else {
-                          btnStyle = "bg-slate-950/40 border-white/5 text-slate-500";
+                          // Nếu khóa xem đáp án, chỉ highlight phương án học sinh đã chọn
+                          btnStyle = isSelected
+                            ? "bg-indigo-500/20 border-indigo-500/60 text-indigo-300 font-semibold"
+                            : "bg-slate-950/40 border-white/5 text-slate-500";
                         }
                       } else if (isSelected) {
                         btnStyle = "bg-cyan-500/20 border-cyan-400 text-cyan-300 font-bold shadow-lg shadow-cyan-500/10";
@@ -593,8 +635,8 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                   </div>
                 )}
 
-                {/* Explanation (Render after submission) */}
-                {submissionResult && q.explanation && (
+                {/* Explanation (Chỉ hiển thị nếu được giáo viên cho phép) */}
+                {submissionResult && allowViewAnswers && q.explanation && (
                   <div className="p-4 rounded-2xl bg-slate-950/80 border border-indigo-500/20 text-xs text-slate-300 space-y-1.5 mt-3">
                     <span className="font-bold text-cyan-400 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5" /> Lời giải chi tiết:
