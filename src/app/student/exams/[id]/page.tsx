@@ -27,6 +27,11 @@ import {
   Lock,
   EyeOff,
   Shuffle,
+  Camera,
+  Image as ImageIcon,
+  UploadCloud,
+  FileText,
+  Bot,
 } from "lucide-react";
 
 export default function ExamTakingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +43,8 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   const [loading, setLoading] = useState(true);
 
   // Exam taking state
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  // answers format: { [qId]: string } for MC, or { [qId]: { text: string, imageUrl: string } } for Essay
+  const [answers, setAnswers] = useState<Record<string, any>>({});
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any | null>(null);
@@ -104,7 +110,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
         // Xử lý đảo đề: Nếu bật shuffle_questions -> đảo ngẫu nhiên thứ tự câu hỏi
         let qList = [...rawQuestions];
         if (data.shuffle_questions) {
-          // Khôi phục thứ tự đã đảo nếu có trong localStorage, hoặc tạo thứ tự đảo mới
           const savedOrder = localStorage.getItem(`chemclass_exam_${examId}_order`);
           if (savedOrder) {
             try {
@@ -236,10 +241,69 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     return () => clearInterval(timer);
   }, [exam, submissionResult, timeLeft]);
 
+  // Xử lý chọn đáp án trắc nghiệm
   function handleSelectOption(questionId: string, optionKey: string) {
     if (submissionResult) return;
 
     const updated = { ...answers, [questionId]: optionKey };
+    setAnswers(updated);
+    localStorage.setItem(`chemclass_exam_${examId}_answers`, JSON.stringify(updated));
+  }
+
+  // Xử lý nhập văn bản tự luận
+  function handleEssayTextChange(questionId: string, text: string) {
+    if (submissionResult) return;
+
+    const current = typeof answers[questionId] === "object" ? answers[questionId] : { text: "", imageUrl: "" };
+    const updated = { ...answers, [questionId]: { ...current, text } };
+    setAnswers(updated);
+    localStorage.setItem(`chemclass_exam_${examId}_answers`, JSON.stringify(updated));
+  }
+
+  // Xử lý upload ảnh tự luận (nén base64)
+  function handleEssayImageUpload(questionId: string, e: React.ChangeEvent<HTMLInputElement>) {
+    if (submissionResult || !e.target.files || e.target.files.length === 0) return;
+
+    const file = e.target.files[0];
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        // Nén ảnh nhỏ hơn 1200px để tải nhanh
+        const canvas = document.createElement("canvas");
+        const maxDim = 1200;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = (height * maxDim) / width;
+            width = maxDim;
+          } else {
+            width = (width * maxDim) / height;
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const base64Data = canvas.toDataURL("image/jpeg", 0.75);
+        const current = typeof answers[questionId] === "object" ? answers[questionId] : { text: "", imageUrl: "" };
+        const updated = { ...answers, [questionId]: { ...current, imageUrl: base64Data } };
+        setAnswers(updated);
+        localStorage.setItem(`chemclass_exam_${examId}_answers`, JSON.stringify(updated));
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Xóa ảnh đã tải lên
+  function handleRemoveEssayImage(questionId: string) {
+    if (submissionResult) return;
+    const current = typeof answers[questionId] === "object" ? answers[questionId] : { text: "", imageUrl: "" };
+    const updated = { ...answers, [questionId]: { ...current, imageUrl: "" } };
     setAnswers(updated);
     localStorage.setItem(`chemclass_exam_${examId}_answers`, JSON.stringify(updated));
   }
@@ -267,6 +331,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
       alert(res.error);
     } else {
       setSubmissionResult(res);
+      setAnswers(res.answers || answers);
       localStorage.removeItem(`chemclass_exam_${examId}_answers`);
       localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
       localStorage.removeItem(`chemclass_exam_${examId}_order`);
@@ -303,7 +368,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     blurEventsLogRef.current = [];
     isFinishedRef.current = false;
 
-    // Tải lại đề thi và đảo lại thứ tự mới
     await loadExam();
     setIsRetaking(false);
   }
@@ -336,7 +400,13 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   }
 
   const questions = displayedQuestions;
-  const answeredCount = Object.keys(answers).length;
+  const answeredCount = Object.keys(answers).filter((k) => {
+    const a = answers[k];
+    if (typeof a === "string") return a.trim().length > 0;
+    if (typeof a === "object") return (a?.text?.trim()?.length || 0) > 0 || !!a?.imageUrl;
+    return false;
+  }).length;
+
   const allowViewAnswers = exam.allow_view_answers !== false;
 
   return (
@@ -358,7 +428,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
 
-        {/* Top Sticky Header: Timer, Questions Nav, Proctoring Badge, Submit */}
+        {/* Top Sticky Header */}
         <div className="sticky top-4 z-40 p-4 rounded-2xl bg-slate-900/95 border border-white/10 backdrop-blur-xl shadow-2xl flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <Link
@@ -421,8 +491,17 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                 disabled={isSubmitting}
                 className="px-4 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs shadow-lg shadow-cyan-400/25 flex items-center gap-1.5 transition-all disabled:opacity-50"
               >
-                {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                <span>Nộp Bài</span>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>AI Đang Chấm Bài...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Nộp Bài</span>
+                  </>
+                )}
               </button>
             ) : (
               <div className="flex items-center gap-2">
@@ -476,7 +555,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           </div>
         )}
 
-        {/* SUBMISSION RESULT BANNER (If submitted) */}
+        {/* SUBMISSION RESULT BANNER */}
         {submissionResult && (
           <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-emerald-950/80 via-slate-900 to-slate-900 border border-emerald-500/40 backdrop-blur-xl shadow-2xl space-y-4 text-center">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto shadow-xl">
@@ -492,7 +571,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               </h2>
               <p className="text-xs text-slate-400 mt-1">
                 {allowViewAnswers
-                  ? "Hệ thống đã tự động chấm điểm. Hãy xem lại đáp án và lời giải chi tiết từng câu ở bên dưới!"
+                  ? "Hệ thống và Trí tuệ nhân tạo (AI) đã chấm điểm tự động. Hãy xem chi tiết điểm số, nhận xét và lời giải ở bên dưới!"
                   : "Hệ thống đã ghi nhận kết quả bài làm của bạn."}
               </p>
             </div>
@@ -514,7 +593,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               )}
             </div>
 
-            {/* Thông báo quyền xem đáp án nếu bị khóa */}
             {!allowViewAnswers && (
               <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-center gap-2">
                 <EyeOff className="w-4 h-4" />
@@ -522,7 +600,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               </div>
             )}
 
-            {/* Quyền làm lại bài thi */}
             <div className="pt-2">
               {exam.allow_retake ? (
                 <button
@@ -546,8 +623,18 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
         {/* QUESTIONS LIST */}
         <div className="space-y-6">
           {questions.map((q: any, idx: number) => {
-            const studentChoice = answers[q.id];
+            const rawAns = answers[q.id];
+            const isEssay = q.type === "short_answer" || !q.options_json || q.options_json.length === 0;
+
+            // Xử lý câu trắc nghiệm
+            const studentChoice = typeof rawAns === "string" ? rawAns : rawAns?.key || "";
             const isCorrect = studentChoice && studentChoice === q.correct_answer;
+
+            // Xử lý câu tự luận
+            const essayText = typeof rawAns === "object" ? rawAns?.text || "" : typeof rawAns === "string" ? rawAns : "";
+            const essayImg = typeof rawAns === "object" ? rawAns?.imageUrl || "" : "";
+            const aiEvaluation = typeof rawAns === "object" ? rawAns?.aiEvaluation : null;
+            const essayEarnedPoints = typeof rawAns === "object" ? rawAns?.earnedPoints : undefined;
 
             return (
               <div
@@ -557,12 +644,17 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               >
                 {/* Question Header */}
                 <div className="flex items-center justify-between gap-2">
-                  <span className="px-3 py-1 rounded-xl bg-indigo-500/20 text-indigo-300 font-bold text-xs border border-indigo-500/30">
-                    Câu {idx + 1} ({q.points || 1} điểm)
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-xl bg-indigo-500/20 text-indigo-300 font-bold text-xs border border-indigo-500/30">
+                      Câu {idx + 1} ({q.points || 1} điểm)
+                    </span>
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-white/5">
+                      {isEssay ? "✍️ Tự luận" : "🔘 Trắc nghiệm"}
+                    </span>
+                  </div>
 
-                  {/* Chỉ hiển thị đúng/sai nếu được phép xem đáp án */}
-                  {submissionResult && allowViewAnswers && (
+                  {/* Trạng thái đúng/sai trắc nghiệm */}
+                  {submissionResult && !isEssay && allowViewAnswers && (
                     <span
                       className={`text-xs font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
                         isCorrect
@@ -574,6 +666,14 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                       {isCorrect ? "Chính xác (+đầy đủ điểm)" : `Sai (Đáp án: ${q.correct_answer})`}
                     </span>
                   )}
+
+                  {/* Điểm tự luận do AI chấm */}
+                  {submissionResult && isEssay && essayEarnedPoints !== undefined && (
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                      <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>AI Chấm: {essayEarnedPoints} / {q.points || 1} đ</span>
+                    </span>
+                  )}
                 </div>
 
                 {/* Question Content (Render KaTeX) */}
@@ -581,8 +681,8 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                   <MathText text={q.content_latex} />
                 </div>
 
-                {/* Options List */}
-                {q.options_json && (
+                {/* NỘI DUNG 1: NẾU LÀ CÂU HỎI TRẮC NGHIỆM */}
+                {!isEssay && q.options_json && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                     {q.options_json.map((opt: any) => {
                       const isSelected = studentChoice === opt.key;
@@ -600,7 +700,6 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                             btnStyle = "bg-slate-950/40 border-white/5 text-slate-500";
                           }
                         } else {
-                          // Nếu khóa xem đáp án, chỉ highlight phương án học sinh đã chọn
                           btnStyle = isSelected
                             ? "bg-indigo-500/20 border-indigo-500/60 text-indigo-300 font-semibold"
                             : "bg-slate-950/40 border-white/5 text-slate-500";
@@ -635,11 +734,128 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                   </div>
                 )}
 
+                {/* NỘI DUNG 2: NẾU LÀ CÂU HỎI TỰ LUẬN (NHẬP VĂN BẢN & CHỤP/TẢI ẢNH) */}
+                {isEssay && (
+                  <div className="space-y-3 pt-2">
+                    {/* Ô Nhập văn bản lời giải */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Nhập câu trả lời / Các bước giải của bạn:</span>
+                      </label>
+                      <textarea
+                        rows={4}
+                        disabled={!!submissionResult}
+                        value={essayText}
+                        onChange={(e) => handleEssayTextChange(q.id, e.target.value)}
+                        placeholder="Trình bày phương trình phản ứng, số mol, các bước tính toán hoặc lời giải thích..."
+                        className="w-full p-3.5 rounded-2xl bg-slate-950/80 border border-white/10 text-white placeholder-slate-500 text-xs focus:ring-2 focus:ring-cyan-500 focus:outline-none leading-relaxed disabled:opacity-80"
+                      />
+                    </div>
+
+                    {/* Phần đính kèm hình ảnh chụp bài làm */}
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Hoặc đính kèm hình ảnh chụp bài làm viết tay:</span>
+                        </label>
+                      </div>
+
+                      {!essayImg ? (
+                        !submissionResult && (
+                          <label className="border-2 border-dashed border-white/15 hover:border-cyan-500/50 bg-slate-950/40 hover:bg-slate-950/60 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={(e) => handleEssayImageUpload(q.id, e)}
+                              className="hidden"
+                            />
+                            <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold">
+                              <Camera className="w-4 h-4" />
+                              <UploadCloud className="w-4 h-4" />
+                              <span>Chụp ảnh từ điện thoại / Tải ảnh bài làm từ máy</span>
+                            </div>
+                            <p className="text-[11px] text-slate-500">
+                              (Hỗ trợ ảnh chụp vở ghi, bài giải viết tay trên giấy - AI sẽ tự động đọc ảnh và chấm điểm)
+                            </p>
+                          </label>
+                        )
+                      ) : (
+                        <div className="relative inline-block border border-white/20 rounded-2xl overflow-hidden bg-slate-950 p-2">
+                          <img
+                            src={essayImg}
+                            alt="Bài làm học sinh"
+                            className="max-h-60 rounded-xl object-contain"
+                          />
+                          {!submissionResult && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEssayImage(q.id)}
+                              className="absolute top-3 right-3 p-1.5 rounded-full bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition-all"
+                              title="Xóa ảnh này"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* KẾT QUẢ AI CHẤM ĐIỂM TỰ LUẬN (Hiển thị sau khi nộp bài) */}
+                    {submissionResult && (
+                      <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-950/80 via-slate-950 to-slate-950 border border-indigo-500/30 text-xs space-y-2 mt-3 shadow-xl">
+                        <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-2">
+                          <div className="flex items-center gap-2 font-bold text-cyan-300">
+                            <Bot className="w-4 h-4 text-cyan-400" />
+                            <span>Trí Tuệ Nhân Tạo (Gemini AI) Đánh Giá & Chấm Điểm:</span>
+                          </div>
+                          {essayEarnedPoints !== undefined && (
+                            <span className="font-bold text-emerald-400">
+                              +{essayEarnedPoints} / {q.points || 1} điểm
+                            </span>
+                          )}
+                        </div>
+
+                        {aiEvaluation?.feedback ? (
+                          <div className="text-slate-200 leading-relaxed space-y-1">
+                            <span className="font-semibold text-amber-300 block">💬 Nhận xét sư phạm:</span>
+                            <p className="bg-slate-900/80 p-3 rounded-xl border border-white/5 text-slate-300">
+                              {aiEvaluation.feedback}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-slate-400 italic">
+                            Hệ thống đã ghi nhận câu trả lời. Giáo viên sẽ theo dõi chi tiết.
+                          </p>
+                        )}
+
+                        {aiEvaluation?.criteria && aiEvaluation.criteria.length > 0 && (
+                          <div className="pt-2 space-y-1">
+                            <span className="font-semibold text-slate-400 text-[11px]">Chi tiết tiêu chí:</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {aiEvaluation.criteria.map((c: any, cIdx: number) => (
+                                <div key={cIdx} className="p-2 rounded-xl bg-slate-900/60 border border-white/5 flex items-center justify-between text-[11px]">
+                                  <span className="text-slate-300 truncate">{c.criterion}</span>
+                                  <span className="font-bold text-emerald-400 flex-shrink-0 ml-2">
+                                    {c.awarded}/{c.max} đ
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Explanation (Chỉ hiển thị nếu được giáo viên cho phép) */}
                 {submissionResult && allowViewAnswers && q.explanation && (
                   <div className="p-4 rounded-2xl bg-slate-950/80 border border-indigo-500/20 text-xs text-slate-300 space-y-1.5 mt-3">
                     <span className="font-bold text-cyan-400 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" /> Lời giải chi tiết:
+                      <Sparkles className="w-3.5 h-3.5" /> Lời giải chuẩn của giáo viên:
                     </span>
                     <div className="leading-relaxed text-slate-300">
                       <MathText text={q.explanation} />
@@ -656,10 +872,20 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           <div className="text-center pt-4 pb-12">
             <button
               onClick={() => setShowConfirmModal(true)}
-              className="px-8 py-3.5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-sm shadow-xl shadow-cyan-400/25 inline-flex items-center gap-2 transition-all"
+              disabled={isSubmitting}
+              className="px-8 py-3.5 rounded-2xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-sm shadow-xl shadow-cyan-400/25 inline-flex items-center gap-2 transition-all disabled:opacity-50"
             >
-              <Send className="w-4 h-4" />
-              <span>Nộp Bài Kiểm Tra Ngay ({answeredCount}/{questions.length} câu)</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>AI Đang Phân Tích & Chấm Bài...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>Nộp Bài Kiểm Tra Ngay ({answeredCount}/{questions.length} câu)</span>
+                </>
+              )}
             </button>
           </div>
         )}
@@ -674,7 +900,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
 
               <h3 className="text-lg font-bold text-white">Xác nhận nộp bài thi?</h3>
               <p className="text-xs text-slate-400">
-                Bạn đã hoàn thành <strong>{answeredCount}/{questions.length}</strong> câu hỏi.
+                Bạn đã hoàn thành <strong>{answeredCount}/{questions.length}</strong> câu hỏi. Hệ thống và Trí tuệ nhân tạo (AI) sẽ tự động chấm điểm và đánh giá chi tiết bài làm của bạn.
               </p>
 
               {tabSwitchCount > 0 && (

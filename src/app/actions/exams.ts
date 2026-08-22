@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateChemistryExamQuestions } from "@/lib/gemini";
+import { generateChemistryExamQuestions, gradeEssayQuestionWithAI } from "@/lib/gemini";
 import { encodeExamTitle, parseExamTitle, ExamConfig } from "@/lib/exam-utils";
 import { revalidatePath } from "next/cache";
 
@@ -128,10 +128,10 @@ export async function saveExamWithQuestions(payload: {
   const pointsPerQuestion = totalPoints / questions.length;
   const questionRecords = questions.map((q, idx) => ({
     exam_id: targetExamId,
-    type: q.type || "multiple_choice",
+    type: q.type || (q.options_json && q.options_json.length > 0 ? "multiple_choice" : "short_answer"),
     content_latex: q.content_latex,
     options_json: q.options_json || null,
-    correct_answer: (q.correct_answer || "A").trim().toUpperCase(),
+    correct_answer: (q.correct_answer || "A").trim(),
     explanation: q.explanation || null,
     points: q.points || pointsPerQuestion,
     order_index: idx + 1,
@@ -453,11 +453,11 @@ export async function getStudentExams() {
 }
 
 /**
- * Học sinh nộp bài thi + Tự động chấm điểm và ghi log giám sát gian lận (Soft Proctoring)
+ * Học sinh nộp bài thi + Tự động chấm điểm (Trắc nghiệm + AI Chấm Tự Luận Multimodal) và ghi log giám sát
  */
 export async function submitStudentExam(payload: {
   examId: string;
-  answers: Record<string, string>;
+  answers: Record<string, any>;
   tabSwitchCount: number;
   blurEventsLog: Array<{ time: string; event: string }>;
 }) {
@@ -480,25 +480,85 @@ export async function submitStudentExam(payload: {
 
   const { data: questions } = await adminClient
     .from("questions")
-    .select("id, correct_answer, points")
+    .select("id, type, content_latex, options_json, correct_answer, explanation, points")
     .eq("exam_id", examId);
 
   if (!questions || questions.length === 0) {
     return { error: "Đề thi không có câu hỏi!" };
   }
 
-  // 2. Chấm điểm tự động
+  // 2. Chấm điểm tự động: Trắc nghiệm theo Key, Tự luận bằng Gemini AI
   let earnedPoints = 0;
   const totalExamPoints = Number(exam.total_points) || 10;
   const pointsPerQuestion = totalExamPoints / questions.length;
+  const detailedAnswers: Record<string, any> = {};
 
   for (const q of questions) {
-    const studentAns = (answers[q.id] || "").trim().toUpperCase();
-    const correctAns = (q.correct_answer || "").trim().toUpperCase();
+    const rawAnswer = answers[q.id];
     const qPoints = Number(q.points) || pointsPerQuestion;
+    const isEssay = q.type === "short_answer" || !q.options_json || q.options_json.length === 0;
 
-    if (studentAns && studentAns === correctAns) {
-      earnedPoints += qPoints;
+    if (isEssay) {
+      // Câu hỏi tự luận: Lấy text và image (nếu có)
+      let studentText = "";
+      let studentImage = "";
+
+      if (typeof rawAnswer === "string") {
+        studentText = rawAnswer;
+      } else if (rawAnswer && typeof rawAnswer === "object") {
+        studentText = rawAnswer.text || "";
+        studentImage = rawAnswer.imageUrl || rawAnswer.image || "";
+      }
+
+      if (studentText.trim() || studentImage) {
+        try {
+          const aiGrade = await gradeEssayQuestionWithAI({
+            questionContent: q.content_latex,
+            standardAnswer: q.explanation || q.correct_answer || "Lời giải chuẩn",
+            maxPoints: qPoints,
+            studentTextAnswer: studentText,
+            studentImageBase64: studentImage,
+          });
+
+          earnedPoints += aiGrade.score;
+          detailedAnswers[q.id] = {
+            text: studentText,
+            imageUrl: studentImage,
+            earnedPoints: aiGrade.score,
+            maxPoints: qPoints,
+            aiFeedback: aiGrade.feedback,
+            criteria: aiGrade.criteria || [],
+          };
+        } catch (err: any) {
+          console.error(`Lỗi chấm AI câu tự luận ${q.id}:`, err);
+          detailedAnswers[q.id] = {
+            text: studentText,
+            imageUrl: studentImage,
+            earnedPoints: 0,
+            maxPoints: qPoints,
+            aiFeedback: "Đã ghi nhận câu trả lời. Giáo viên sẽ xem lại.",
+          };
+        }
+      } else {
+        // Chưa trả lời
+        detailedAnswers[q.id] = {
+          text: "",
+          earnedPoints: 0,
+          maxPoints: qPoints,
+          aiFeedback: "Học sinh bỏ trống câu này.",
+        };
+      }
+    } else {
+      // Câu trắc nghiệm
+      const studentChoice = (typeof rawAnswer === "string" ? rawAnswer : rawAnswer?.key || rawAnswer?.text || "").trim().toUpperCase();
+      const correctChoice = (q.correct_answer || "A").trim().toUpperCase();
+      const isCorrect = studentChoice && studentChoice === correctChoice;
+
+      if (isCorrect) {
+        earnedPoints += qPoints;
+      }
+
+      detailedAnswers[q.id] = studentChoice;
     }
   }
 
@@ -506,7 +566,7 @@ export async function submitStudentExam(payload: {
   const safeTabSwitchCount = Number(tabSwitchCount) || 0;
   const safeBlurEventsLog = Array.isArray(blurEventsLog) ? blurEventsLog : [];
 
-  // 3. Ghi nhận kết quả vào bảng exam_submissions (vượt qua RLS bằng adminClient)
+  // 3. Ghi nhận kết quả vào bảng exam_submissions
   const { data: submission, error: subErr } = await adminClient
     .from("exam_submissions")
     .upsert(
@@ -514,7 +574,7 @@ export async function submitStudentExam(payload: {
         exam_id: examId,
         student_id: user.id,
         score: finalScore,
-        answers_json: answers,
+        answers_json: detailedAnswers,
         tab_switch_count: safeTabSwitchCount,
         blur_events_log: safeBlurEventsLog,
         submitted_at: new Date().toISOString(),
@@ -538,7 +598,7 @@ export async function submitStudentExam(payload: {
     totalPoints: totalExamPoints,
     tabSwitchCount: safeTabSwitchCount,
     blurEventsLog: safeBlurEventsLog,
-    answers,
+    answers: detailedAnswers,
   };
 }
 
@@ -554,7 +614,6 @@ export async function resetStudentSubmission(examId: string, studentIdOverride?:
 
   const adminClient = createAdminClient();
 
-  // Kiểm tra quyền: Nếu là giáo viên, cho phép reset bất kỳ học sinh nào
   const { data: exam } = await adminClient
     .from("exams")
     .select("title, teacher_id")
@@ -564,10 +623,10 @@ export async function resetStudentSubmission(examId: string, studentIdOverride?:
   if (!exam) return { error: "Không tìm thấy đề thi!" };
 
   const isTeacher = exam.teacher_id === user.id;
-  const { allowRetake } = parseExamTitle(exam.title);
+  const config = parseExamTitle(exam.title);
 
   // Nếu là học sinh và giáo viên không cho phép làm lại -> chặn
-  if (!isTeacher && !allowRetake) {
+  if (!isTeacher && !config.allowRetake) {
     return { error: "Giáo viên không cho phép làm lại đề thi này!" };
   }
 
