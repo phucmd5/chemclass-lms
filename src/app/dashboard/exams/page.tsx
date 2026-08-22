@@ -8,6 +8,7 @@ import {
   getTeacherExams,
   getExamWithQuestions,
   toggleExamPublish,
+  toggleExamAllowRetake,
   deleteExam,
 } from "@/app/actions/exams";
 import { getTeacherClasses } from "@/app/actions/classes";
@@ -40,6 +41,9 @@ import {
   Download,
   Table as TableIcon,
   PlusCircle,
+  RotateCcw,
+  Lock,
+  Unlock,
 } from "lucide-react";
 
 // Gợi ý chuyên đề Hóa học & KHTN THCS theo từng khối lớp
@@ -107,6 +111,7 @@ export default function AIExamStudioPage() {
   const [targetClassId, setTargetClassId] = useState<string>("");
   const [durationMinutes, setDurationMinutes] = useState<number>(45);
   const [isPublished, setIsPublished] = useState<boolean>(true);
+  const [allowRetake, setAllowRetake] = useState<boolean>(false); // Quyền làm lại bài thi
   const [savingExam, setSavingExam] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isExportingWord, setIsExportingWord] = useState(false);
@@ -176,7 +181,7 @@ export default function AIExamStudioPage() {
     }
   }
 
-  // Bắt đầu chỉnh sửa một đề thi đã tạo (kể cả đề đã xuất bản)
+  // Bắt đầu chỉnh sửa một đề thi đã tạo
   async function handleStartEditExam(examId: string) {
     setLoadingPreview(true);
     const detail = await getExamWithQuestions(examId);
@@ -192,6 +197,7 @@ export default function AIExamStudioPage() {
     setTargetClassId(detail.class_id);
     setDurationMinutes(detail.duration_minutes || 45);
     setIsPublished(detail.is_published ?? true);
+    setAllowRetake(detail.allow_retake ?? false);
     setSelectedGrade(detail.classes?.grade || "8");
 
     const mappedQuestions = (detail.questions || []).map((q: any) => ({
@@ -212,11 +218,27 @@ export default function AIExamStudioPage() {
   function handleCancelEdit() {
     setEditingExamId(null);
     setExamTitle("");
+    setAllowRetake(false);
     setGeneratedQuestions([]);
     showToast("Đã chuyển về chế độ tạo đề thi mới.");
   }
 
-  // Xuất file Word (.docx) từ bộ câu hỏi hiện tại hoặc từ đề thi đã lưu
+  // Bật / Tắt quyền làm lại bài thi 1 Chạm
+  async function handleToggleAllowRetake(examId: string, currentStatus: boolean) {
+    const res = await toggleExamAllowRetake(examId, currentStatus);
+    if (res.error) {
+      alert(res.error);
+    } else {
+      showToast(
+        !currentStatus
+          ? "🟢 Đã CHO PHÉP học sinh làm lại đề thi này!"
+          : "🔒 Đã KHÓA, học sinh chỉ được làm 1 lần duy nhất!"
+      );
+      loadData();
+    }
+  }
+
+  // Xuất file Word (.docx)
   async function handleExportDocx(examData?: any) {
     try {
       setIsExportingWord(true);
@@ -245,7 +267,6 @@ export default function AIExamStudioPage() {
         questions: targetQuestions,
       });
 
-      // Kích hoạt tải file .docx về máy
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -283,7 +304,8 @@ export default function AIExamStudioPage() {
       durationMinutes,
       totalPoints: 10.0,
       isPublished,
-      questions: generatedQuestions.map((q, idx) => ({
+      allowRetake,
+      questions: generatedQuestions.map((q) => ({
         type: q.type || "multiple_choice",
         content_latex: q.content_latex,
         options_json: q.options || [],
@@ -302,6 +324,7 @@ export default function AIExamStudioPage() {
       setEditingExamId(null);
       setGeneratedQuestions([]);
       setExamTitle("");
+      setAllowRetake(false);
       setActiveTab("list");
       loadData();
     }
@@ -422,7 +445,7 @@ export default function AIExamStudioPage() {
             Quản Lý & Chỉnh Sửa Đề Thi AI (THCS)
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Biên soạn đề thi, chỉnh sửa câu hỏi trực tiếp, xuất file Word (.docx) chuẩn Bộ GD&ĐT kèm Ma trận GDPT 2018
+            Biên soạn đề thi, tùy chọn cho phép học sinh làm lại, xuất file Word (.docx) chuẩn Bộ GD&ĐT
           </p>
         </div>
 
@@ -492,20 +515,37 @@ export default function AIExamStudioPage() {
                   className="p-6 rounded-3xl bg-slate-900/70 border border-white/10 hover:border-indigo-500/50 backdrop-blur-xl transition-all flex flex-col justify-between space-y-4 group"
                 >
                   <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
                       <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                         {ex.classes?.name || "Lớp học"} (Khối {ex.classes?.grade || "THCS"})
                       </span>
 
-                      {ex.is_published ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                          <Check className="w-3 h-3" /> Đang mở
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-white/10">
-                          Bản nháp
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {/* BADGE QUYỀN LÀM LẠI BÀI THI */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleAllowRetake(ex.id, ex.allow_retake)}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 transition-all ${
+                            ex.allow_retake
+                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/30"
+                              : "bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20"
+                          }`}
+                          title="Bấm để bật/tắt quyền cho phép học sinh làm lại"
+                        >
+                          {ex.allow_retake ? <RotateCcw className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
+                          <span>{ex.allow_retake ? "Cho phép làm lại" : "Chỉ làm 1 lần"}</span>
+                        </button>
+
+                        {ex.is_published ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                            <Check className="w-3 h-3" /> Đang mở
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-white/10">
+                            Bản nháp
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <h3 className="text-base font-bold text-white group-hover:text-indigo-300 transition-colors line-clamp-2">
@@ -533,14 +573,13 @@ export default function AIExamStudioPage() {
 
                   <div className="pt-3 border-t border-white/5 flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-1.5">
-                      {/* NÚT CHỈNH SỬA ĐỀ THI (KỂ CẢ ĐỀ ĐÃ XUẤT BẢN) */}
                       <button
                         onClick={() => handleStartEditExam(ex.id)}
                         className="px-2.5 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-xs font-bold flex items-center gap-1 transition-all"
                         title="Chỉnh sửa đề thi & câu hỏi"
                       >
                         <Edit className="w-3.5 h-3.5" />
-                        <span>Sửa Đề</span>
+                        <span>Sửa</span>
                       </button>
 
                       <button
@@ -819,7 +858,7 @@ export default function AIExamStudioPage() {
                   </div>
                   <h3 className="text-base font-bold text-white">Không gian soạn đề & chỉnh sửa</h3>
                   <p className="text-xs text-slate-400 max-w-sm">
-                    Chọn chủ đề và bấm <strong>"Bấm Để AI Biên Soạn Đề Thi"</strong> ở khung bên trái hoặc bấm <strong>"Sửa Đề"</strong> từ danh sách để tùy biến câu hỏi.
+                    Chọn chủ đề và bấm <strong>"Bấm Để AI Biên Soạn Đề Thi"</strong> ở khung bên trái hoặc bấm <strong>"Sửa"</strong> từ danh sách để tùy biến câu hỏi.
                   </p>
                 </div>
               ) : (
@@ -910,6 +949,27 @@ export default function AIExamStudioPage() {
                         </div>
                       </div>
 
+                      {/* TÙY CHỌN CHO PHÉP LÀM LẠI & XUẤT BẢN */}
+                      <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/5 space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer text-xs text-white font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={allowRetake}
+                            onChange={(e) => setAllowRetake(e.target.checked)}
+                            className="rounded border-white/20 text-emerald-500 focus:ring-emerald-400 w-4 h-4"
+                          />
+                          <span className="flex items-center gap-1.5 text-emerald-300">
+                            <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+                            Cho phép học sinh làm lại bài thi (Retake)
+                          </span>
+                        </label>
+                        <p className="text-[11px] text-slate-400 pl-6">
+                          {allowRetake
+                            ? "✅ Học sinh sau khi nộp bài có thể bấm 'Làm lại' để rèn luyện nhiều lần."
+                            : "🔒 Học sinh chỉ được làm bài 1 lần duy nhất (phù hợp với bài thi lấy điểm chính thức)."}
+                        </p>
+                      </div>
+
                       <div className="flex items-center justify-between pt-2 border-t border-white/10">
                         <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
                           <input
@@ -982,7 +1042,6 @@ export default function AIExamStudioPage() {
                           </div>
 
                           <div className="flex items-center gap-1">
-                            {/* NÚT SỬA CÂU HỎI TRỰC TIẾP */}
                             <button
                               type="button"
                               onClick={() => handleOpenEditQuestion(idx)}
@@ -1084,7 +1143,6 @@ export default function AIExamStudioPage() {
             </div>
 
             <form onSubmit={handleSaveEditedQuestion} className="space-y-4">
-              {/* Nội dung câu hỏi */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Đề Bài Câu Hỏi (Hỗ trợ LaTeX kẹp giữa $...$) *
@@ -1104,7 +1162,6 @@ export default function AIExamStudioPage() {
                 )}
               </div>
 
-              {/* 4 Phương án A, B, C, D */}
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-slate-300">
                   Các Phương Án Lựa Chọn (A, B, C, D)
@@ -1132,7 +1189,6 @@ export default function AIExamStudioPage() {
                 </div>
               </div>
 
-              {/* Chọn đáp án đúng */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Đáp Án Đúng *
@@ -1149,7 +1205,6 @@ export default function AIExamStudioPage() {
                 </select>
               </div>
 
-              {/* Lời giải chi tiết */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   Lời Giải Chi Tiết
@@ -1328,7 +1383,7 @@ export default function AIExamStudioPage() {
                 </span>
                 <h2 className="text-xl font-bold text-white mt-1">{previewExam.title}</h2>
                 <p className="text-xs text-slate-400">
-                  Lớp: {previewExam.classes?.name} (Khối {previewExam.classes?.grade}) • Thời gian: {previewExam.duration_minutes} phút
+                  Lớp: {previewExam.classes?.name} (Khối {previewExam.classes?.grade}) • Thời gian: {previewExam.duration_minutes} phút • {previewExam.allow_retake ? "Cho phép làm lại" : "Chỉ làm 1 lần"}
                 </p>
               </div>
 

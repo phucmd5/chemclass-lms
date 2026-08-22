@@ -15,6 +15,8 @@ import {
   Award,
   Loader2,
   Calendar,
+  RotateCcw,
+  Lock,
 } from "lucide-react";
 
 export default function StudentExamsPage() {
@@ -100,22 +102,36 @@ export default function StudentExamsPage() {
                   }`}
                 >
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                         {ex.classes?.name} (Khối {ex.classes?.grade})
                       </span>
 
-                      {hasSubmitted ? (
-                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>Đã nộp bài</span>
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          <span>Chưa làm bài</span>
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {ex.allow_retake ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Cho làm lại</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-white/10 flex items-center gap-1">
+                            <Lock className="w-3 h-3 text-amber-400" />
+                            <span>Làm 1 lần</span>
+                          </span>
+                        )}
+
+                        {hasSubmitted ? (
+                          <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Đã nộp bài</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>Chưa làm bài</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <h3 className="text-base font-bold text-white line-clamp-2">{ex.title}</h3>
@@ -163,7 +179,9 @@ export default function StudentExamsPage() {
                       {hasSubmitted ? (
                         <>
                           <Eye className="w-4 h-4" />
-                          <span>Xem lại bài làm & Đáp án</span>
+                          <span>
+                            {ex.allow_retake ? "Xem bài làm & Làm lại bài thi" : "Xem lại bài làm & Đáp án"}
+                          </span>
                         </>
                       ) : (
                         <>

@@ -23,6 +23,7 @@ import {
   AlertOctagon,
   RotateCcw,
   Volume2,
+  Lock,
 } from "lucide-react";
 
 export default function ExamTakingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -252,12 +253,23 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     }
   }
 
-  // Làm lại bài thi (Dành cho kiểm thử)
+  // Làm lại bài thi (Nếu được giáo viên cho phép)
   async function handleRetakeExam() {
+    if (!exam?.allow_retake) {
+      alert("Giáo viên không cho phép làm lại đề thi này!");
+      return;
+    }
+
     if (!confirm("Bạn có chắc chắn muốn xóa kết quả cũ và làm lại bài kiểm tra này không?")) return;
 
     setIsRetaking(true);
-    await resetStudentSubmission(examId);
+    const res = await resetStudentSubmission(examId);
+
+    if (res.error) {
+      alert(res.error);
+      setIsRetaking(false);
+      return;
+    }
 
     localStorage.removeItem(`chemclass_exam_${examId}_answers`);
     localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
@@ -394,15 +406,17 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                   <span>{submissionResult.score}/{submissionResult.totalPoints} đ</span>
                 </div>
 
-                <button
-                  onClick={handleRetakeExam}
-                  disabled={isRetaking}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-all border border-white/10"
-                  title="Xóa bài nộp cũ và làm lại bài thi"
-                >
-                  <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Làm lại</span>
-                </button>
+                {exam.allow_retake && (
+                  <button
+                    onClick={handleRetakeExam}
+                    disabled={isRetaking}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-all border border-white/10"
+                    title="Xóa bài nộp cũ và làm lại bài thi"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Làm lại</span>
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -474,15 +488,23 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               )}
             </div>
 
+            {/* Quyền làm lại bài thi */}
             <div className="pt-2">
-              <button
-                onClick={handleRetakeExam}
-                disabled={isRetaking}
-                className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-400/20 inline-flex items-center gap-2 transition-all"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Làm Lại Bài Thi Này</span>
-              </button>
+              {exam.allow_retake ? (
+                <button
+                  onClick={handleRetakeExam}
+                  disabled={isRetaking}
+                  className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-400/20 inline-flex items-center gap-2 transition-all"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Làm Lại Bài Thi Này</span>
+                </button>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-950/80 border border-white/10 text-xs text-slate-400">
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Đề thi này chỉ được làm 1 lần duy nhất theo cấu hình của giáo viên.</span>
+                </div>
+              )}
             </div>
           </div>
         )}

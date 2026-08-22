@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateChemistryExamQuestions } from "@/lib/gemini";
+import { encodeExamTitle, parseExamTitle } from "@/lib/exam-utils";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -26,7 +27,7 @@ export async function generateAIExamQuestionsAction(payload: {
 }
 
 /**
- * Lưu đề thi kèm danh sách câu hỏi vào cơ sở dữ liệu
+ * Lưu đề thi kèm danh sách câu hỏi vào cơ sở dữ liệu (hỗ trợ allowRetake)
  */
 export async function saveExamWithQuestions(payload: {
   examId?: string;
@@ -35,6 +36,7 @@ export async function saveExamWithQuestions(payload: {
   durationMinutes: number;
   totalPoints?: number;
   isPublished?: boolean;
+  allowRetake?: boolean;
   questions: Array<{
     type: string;
     content_latex: string;
@@ -51,6 +53,7 @@ export async function saveExamWithQuestions(payload: {
     durationMinutes = 45,
     totalPoints = 10,
     isPublished = true,
+    allowRetake = false,
     questions,
   } = payload;
 
@@ -64,20 +67,23 @@ export async function saveExamWithQuestions(payload: {
   if (!user) return { error: "Bạn chưa đăng nhập!" };
 
   const adminClient = createAdminClient();
+  const encodedTitle = encodeExamTitle(title, allowRetake);
 
   let targetExamId = examId;
 
   // 1. Tạo hoặc cập nhật đề thi trong bảng exams
   if (targetExamId) {
+    const updateData: any = {
+      class_id: classId,
+      title: encodedTitle,
+      duration_minutes: durationMinutes,
+      total_points: totalPoints,
+      is_published: isPublished,
+    };
+
     const { error: updateErr } = await adminClient
       .from("exams")
-      .update({
-        class_id: classId,
-        title,
-        duration_minutes: durationMinutes,
-        total_points: totalPoints,
-        is_published: isPublished,
-      })
+      .update(updateData)
       .eq("id", targetExamId)
       .eq("teacher_id", user.id);
 
@@ -88,16 +94,18 @@ export async function saveExamWithQuestions(payload: {
     // Xóa câu hỏi cũ để nạp câu hỏi mới
     await adminClient.from("questions").delete().eq("exam_id", targetExamId);
   } else {
+    const insertData: any = {
+      class_id: classId,
+      teacher_id: user.id,
+      title: encodedTitle,
+      duration_minutes: durationMinutes,
+      total_points: totalPoints,
+      is_published: isPublished,
+    };
+
     const { data: newExam, error: insExamErr } = await adminClient
       .from("exams")
-      .insert({
-        class_id: classId,
-        teacher_id: user.id,
-        title,
-        duration_minutes: durationMinutes,
-        total_points: totalPoints,
-        is_published: isPublished,
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -170,16 +178,21 @@ export async function getTeacherExams() {
     return [];
   }
 
-  return (exams || []).map((ex: any) => ({
-    ...ex,
-    classes: Array.isArray(ex.classes) ? ex.classes[0] : ex.classes,
-    questionCount: ex.questions?.length || 0,
-    submissionCount: ex.exam_submissions?.length || 0,
-  }));
+  return (exams || []).map((ex: any) => {
+    const { title: cleanTitle, allowRetake } = parseExamTitle(ex.title, ex.allow_retake);
+    return {
+      ...ex,
+      title: cleanTitle,
+      allow_retake: allowRetake,
+      classes: Array.isArray(ex.classes) ? ex.classes[0] : ex.classes,
+      questionCount: ex.questions?.length || 0,
+      submissionCount: ex.exam_submissions?.length || 0,
+    };
+  });
 }
 
 /**
- * Lấy chi tiết đề thi kèm danh sách câu hỏi & kết quả bài làm của học sinh (nếu đã nộp)
+ * Lấy chi tiết đề thi kèm danh sách câu hỏi & kết quả bài làm của học sinh
  */
 export async function getExamWithQuestions(examId: string) {
   if (!examId) return null;
@@ -224,12 +237,50 @@ export async function getExamWithQuestions(examId: string) {
     }
   }
 
+  const { title: cleanTitle, allowRetake } = parseExamTitle(exam.title, exam.allow_retake);
+
   return {
     ...exam,
+    title: cleanTitle,
+    allow_retake: allowRetake,
     classes: Array.isArray(exam.classes) ? exam.classes[0] : exam.classes,
     questions: questions || [],
     mySubmission,
   };
+}
+
+/**
+ * Bật / Tắt cho phép học sinh làm lại đề thi (1 Chạm)
+ */
+export async function toggleExamAllowRetake(examId: string, currentAllowRetake: boolean) {
+  if (!examId) return { error: "Thiếu ID đề thi!" };
+
+  const adminClient = createAdminClient();
+
+  const { data: exam } = await adminClient
+    .from("exams")
+    .select("title")
+    .eq("id", examId)
+    .single();
+
+  if (!exam) return { error: "Không tìm thấy đề thi!" };
+
+  const newAllowRetake = !currentAllowRetake;
+  const newTitle = encodeExamTitle(exam.title, newAllowRetake);
+
+  const { error } = await adminClient
+    .from("exams")
+    .update({ title: newTitle })
+    .eq("id", examId);
+
+  if (error) {
+    return { error: `Lỗi cập nhật quyền làm lại: ${error.message}` };
+  }
+
+  revalidatePath("/dashboard/exams");
+  revalidatePath("/student/exams");
+  revalidatePath(`/student/exams/${examId}`);
+  return { success: true, allowRetake: newAllowRetake };
 }
 
 /**
@@ -338,9 +389,12 @@ export async function getStudentExams() {
         (sub: any) => sub.student_id === user.id
       );
       const latestSub = userSubmissions[0] || null;
+      const { title: cleanTitle, allowRetake } = parseExamTitle(ex.title, ex.allow_retake);
 
       return {
         ...ex,
+        title: cleanTitle,
+        allow_retake: allowRetake,
         classes: Array.isArray(ex.classes) ? ex.classes[0] : ex.classes,
         questionCount: ex.questions?.length || 0,
         mySubmission: latestSub,
@@ -440,9 +494,9 @@ export async function submitStudentExam(payload: {
 }
 
 /**
- * Xóa kết quả bài thi cũ để học sinh làm lại (Dành cho kiểm thử hoặc cho phép thi lại)
+ * Đặt lại bài thi cho học sinh (kiểm tra quyền allow_retake của giáo viên)
  */
-export async function resetStudentSubmission(examId: string) {
+export async function resetStudentSubmission(examId: string, studentIdOverride?: string) {
   if (!examId) return { error: "Thiếu ID đề thi!" };
 
   const supabase = await createClient();
@@ -450,11 +504,31 @@ export async function resetStudentSubmission(examId: string) {
   if (!user) return { error: "Chưa đăng nhập!" };
 
   const adminClient = createAdminClient();
+
+  // Kiểm tra quyền: Nếu là giáo viên, cho phép reset bất kỳ học sinh nào
+  const { data: exam } = await adminClient
+    .from("exams")
+    .select("title, teacher_id")
+    .eq("id", examId)
+    .single();
+
+  if (!exam) return { error: "Không tìm thấy đề thi!" };
+
+  const isTeacher = exam.teacher_id === user.id;
+  const { allowRetake } = parseExamTitle(exam.title);
+
+  // Nếu là học sinh và giáo viên không cho phép làm lại -> chặn
+  if (!isTeacher && !allowRetake) {
+    return { error: "Giáo viên không cho phép làm lại đề thi này!" };
+  }
+
+  const targetStudentId = (isTeacher && studentIdOverride) ? studentIdOverride : user.id;
+
   const { error } = await adminClient
     .from("exam_submissions")
     .delete()
     .eq("exam_id", examId)
-    .eq("student_id", user.id);
+    .eq("student_id", targetStudentId);
 
   if (error) {
     return { error: `Lỗi đặt lại bài thi: ${error.message}` };
