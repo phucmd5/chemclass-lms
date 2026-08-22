@@ -14,6 +14,17 @@ export interface GeneratedQuestion {
 }
 
 /**
+ * Danh sách model Gemini AI hoạt động chính xác và ổn định nhất
+ */
+const ACTIVE_GEMINI_MODELS = [
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.1-pro-preview",
+];
+
+/**
  * Gọi Google Gemini AI để sinh đề kiểm tra Hóa học / KHTN THCS kèm công thức LaTeX KaTeX
  */
 export async function generateChemistryExamQuestions(params: {
@@ -37,20 +48,24 @@ export async function generateChemistryExamQuestions(params: {
     throw new Error("Chưa cấu hình GEMINI_API_KEY trong file môi trường (.env.local)!");
   }
 
-  const models = ["gemini-flash-latest", "gemini-pro-latest", "gemini-pro"];
-
   const prompt = `Bạn là chuyên gia giáo dục Hóa học và Khoa học Tự nhiên cấp THCS (Việt Nam) theo chương trình GDPT mới.
 Hãy biên soạn bộ câu hỏi kiểm tra cho học sinh:
 - Khối lớp: Khối ${grade} (Cấp THCS)
 - Chủ đề / Chuyên đề: "${topic}"
 - Số lượng câu hỏi: ${questionCount} câu
 - Mức độ nhận thức: ${difficulty}
-- Dạng câu hỏi: ${questionType === "multiple_choice" ? "Trắc nghiệm 4 lựa chọn (A, B, C, D)" : questionType === "short_answer" ? "Tự luận trả lời ngắn" : "Kết hợp trắc nghiệm và tự luận ngắn"}
+- Dạng câu hỏi: ${
+    questionType === "multiple_choice"
+      ? "Trắc nghiệm 4 lựa chọn (A, B, C, D)"
+      : questionType === "short_answer"
+      ? "Tự luận trả lời ngắn"
+      : "Kết hợp trắc nghiệm và tự luận ngắn"
+  }
 ${customInstructions ? `- Yêu cầu bổ sung: ${customInstructions}` : ""}
 
 QUY TẮC BẮT BUỘC:
 1. Tất cả các công thức hóa học, phương trình phản ứng, số mũ, chỉ số dưới PHẢI được định dạng chuẩn LaTeX kẹp giữa cặp dấu $, ví dụ:
-   - Công thức: $H_2SO_4$, $Fe_2O_3$, $Ba(OH)_2$, $CO_2$, $KMnO_4$.
+   - Công thức: $H_2SO_4$, $Fe_2O_3$, $Ba(OH)_2$, $CO_2$, $KMnO_4$, $P_2O_5$.
    - Phương trình phản ứng: $2H_2 + O_2 \\xrightarrow{t^o} 2H_2O$, $Fe + 2HCl \\rightarrow FeCl_2 + H_2 \\uparrow$.
    - Phân số, nồng độ: $C_M = \\frac{n}{V}$, $C\\% = \\frac{m_{ct}}{m_{dd}} \\times 100\\%$.
 2. Nội dung câu hỏi và đáp án phải rõ ràng, chính xác tuyệt đối về mặt khoa học và sư phạm.
@@ -68,14 +83,14 @@ QUY TẮC BẮT BUỘC:
       { "key": "D", "text": "Đáp án D" }
     ],
     "correct_answer": "A",
-    "explanation": "Giải thích chi tiết",
+    "explanation": "Giải thích chi tiết từng bước",
     "difficulty": "Nhận biết"
   }
 ]`;
 
   let lastError: any = null;
 
-  for (const m of models) {
+  for (const m of ACTIVE_GEMINI_MODELS) {
     try {
       const model = genAI.getGenerativeModel({
         model: m,
@@ -94,10 +109,10 @@ QUY TẮC BẮT BUỘC:
           type: q.type || "multiple_choice",
           content_latex: q.content_latex || `Câu hỏi ${idx + 1}`,
           options: Array.isArray(q.options) ? q.options : [],
-          correct_answer: q.correct_answer || "A",
+          correct_answer: (q.correct_answer || "A").trim().toUpperCase(),
           explanation: q.explanation || "",
           difficulty: q.difficulty || "Thông hiểu",
-          points: 10 / parsed.length,
+          points: Math.round((10 / parsed.length) * 100) / 100,
         }));
       }
     } catch (err: any) {
