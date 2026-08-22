@@ -3,7 +3,7 @@
 import React, { useState, useEffect, use, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getExamWithQuestions, submitStudentExam } from "@/app/actions/exams";
+import { getExamWithQuestions, submitStudentExam, resetStudentSubmission } from "@/app/actions/exams";
 import { MathText } from "@/components/KatexFormula";
 import {
   Sparkles,
@@ -21,6 +21,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   AlertOctagon,
+  RotateCcw,
+  Volume2,
 } from "lucide-react";
 
 export default function ExamTakingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +38,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [isRetaking, setIsRetaking] = useState(false);
 
   // Soft Proctoring State (Giám sát rời tab)
   const [tabSwitchCount, setTabSwitchCount] = useState<number>(0);
@@ -46,7 +49,26 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   const tabSwitchCountRef = useRef<number>(0);
   const blurEventsLogRef = useRef<Array<{ time: string; event: string }>>([]);
   const lastSwitchTimeRef = useRef<number>(0);
-  const hasSubmittedRef = useRef<boolean>(false);
+  const isFinishedRef = useRef<boolean>(false);
+
+  // Phát âm thanh cảnh báo khi phát hiện rời tab
+  function playWarningTone() {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // 880 Hz
+      gain.gain.setValueAtTime(0.4, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch {}
+  }
 
   // Tải thông tin đề thi
   async function loadExam() {
@@ -65,8 +87,11 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
         });
         setAnswers(data.mySubmission.answers_json || {});
         setTabSwitchCount(data.mySubmission.tab_switch_count || 0);
-        hasSubmittedRef.current = true;
+        tabSwitchCountRef.current = data.mySubmission.tab_switch_count || 0;
+        blurEventsLogRef.current = data.mySubmission.blur_events_log || [];
+        isFinishedRef.current = true;
       } else {
+        isFinishedRef.current = false;
         // Khôi phục câu trả lời đã lưu từ localStorage (nếu có)
         const savedAnswers = localStorage.getItem(`chemclass_exam_${examId}_answers`);
         if (savedAnswers) {
@@ -99,13 +124,13 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     loadExam();
   }, [examId]);
 
-  // Hàm ghi nhận sự kiện rời khỏi màn hình thi
+  // Hàm ghi nhận sự kiện rời khỏi màn hình thi (Chống debounce)
   const recordTabSwitch = useCallback((eventType: string) => {
-    if (hasSubmittedRef.current) return;
+    if (isFinishedRef.current) return;
 
     const now = Date.now();
-    // Tránh tính trùng khi visibilitychange và blur cùng kích hoạt trong 700ms
-    if (now - lastSwitchTimeRef.current < 700) {
+    // Tránh tính trùng khi visibilitychange và blur cùng kích hoạt trong 600ms
+    if (now - lastSwitchTimeRef.current < 600) {
       return;
     }
     lastSwitchTimeRef.current = now;
@@ -117,6 +142,8 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     const eventDesc =
       eventType === "hidden"
         ? "Chuyển sang tab khác / Thu nhỏ trình duyệt (Document Hidden)"
+        : eventType === "test"
+        ? "Thử nghiệm giả lập rời tab"
         : "Chuyển sang ứng dụng khác (Window Blur)";
 
     const newLogItem = {
@@ -135,6 +162,9 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
         log: blurEventsLogRef.current,
       })
     );
+
+    // Phát âm thanh cảnh báo
+    playWarningTone();
 
     // Bật cảnh báo nổi bật trên màn hình
     setProctorWarning(
@@ -202,7 +232,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   async function submitAnswers() {
     setIsSubmitting(true);
     setShowConfirmModal(false);
-    hasSubmittedRef.current = true;
+    isFinishedRef.current = true;
 
     const res = await submitStudentExam({
       examId,
@@ -220,6 +250,32 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
       localStorage.removeItem(`chemclass_exam_${examId}_answers`);
       localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
     }
+  }
+
+  // Làm lại bài thi (Dành cho kiểm thử)
+  async function handleRetakeExam() {
+    if (!confirm("Bạn có chắc chắn muốn xóa kết quả cũ và làm lại bài kiểm tra này không?")) return;
+
+    setIsRetaking(true);
+    await resetStudentSubmission(examId);
+
+    localStorage.removeItem(`chemclass_exam_${examId}_answers`);
+    localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
+
+    setSubmissionResult(null);
+    setAnswers({});
+    setTabSwitchCount(0);
+    setBlurEventsLog([]);
+    setProctorWarning(null);
+    tabSwitchCountRef.current = 0;
+    blurEventsLogRef.current = [];
+    isFinishedRef.current = false;
+
+    if (exam) {
+      setTimeLeft((exam.duration_minutes || 45) * 60);
+    }
+
+    setIsRetaking(false);
   }
 
   // Định dạng thời gian MM:SS
@@ -296,12 +352,12 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* HUY HIỆU GIÁM SÁT RỜI TAB THỜI GIAN THỰC (LIVE PROCTORING BADGE) */}
             {tabSwitchCount === 0 ? (
-              <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+              <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5 shadow-sm">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
                 <span>Giám sát: 0 lần rời tab</span>
               </span>
             ) : (
-              <span className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/50 text-xs font-black flex items-center gap-1.5 animate-pulse shadow-lg shadow-rose-500/20">
+              <span className="px-3 py-1.5 rounded-xl bg-rose-500/30 text-rose-300 border border-rose-500/60 text-xs font-black flex items-center gap-1.5 animate-pulse shadow-lg shadow-rose-500/30">
                 <ShieldAlert className="w-4 h-4 text-rose-400" />
                 <span>ĐÃ RỜI TAB: {tabSwitchCount} LẦN!</span>
               </span>
@@ -332,13 +388,55 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                 <span>Nộp Bài</span>
               </button>
             ) : (
-              <div className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5">
-                <Award className="w-4 h-4" />
-                <span>Điểm: {submissionResult.score}/{submissionResult.totalPoints} đ</span>
+              <div className="flex items-center gap-2">
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center gap-1.5">
+                  <Award className="w-4 h-4" />
+                  <span>{submissionResult.score}/{submissionResult.totalPoints} đ</span>
+                </div>
+
+                <button
+                  onClick={handleRetakeExam}
+                  disabled={isRetaking}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition-all border border-white/10"
+                  title="Xóa bài nộp cũ và làm lại bài thi"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Làm lại</span>
+                </button>
               </div>
             )}
           </div>
         </div>
+
+        {/* KHUNG GIÁM SÁT GIAN LẬN TRỰC TIẾP TRÊN MÀN HÌNH LÀM BÀI */}
+        {!submissionResult && (
+          <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/10 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className={`w-5 h-5 ${tabSwitchCount > 0 ? "text-rose-400 animate-pulse" : "text-emerald-400"}`} />
+              <div>
+                <span className="font-bold text-white block">
+                  Hệ thống giám sát chống gian lận (Soft Proctoring)
+                </span>
+                <span className="text-slate-400 text-[11px]">
+                  Số lần phát hiện rời khỏi tab thi:{" "}
+                  <strong className={tabSwitchCount > 0 ? "text-rose-400 font-black text-xs" : "text-emerald-400 font-bold"}>
+                    {tabSwitchCount} lần
+                  </strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Nút bấm giả lập test rời tab */}
+            <button
+              type="button"
+              onClick={() => recordTabSwitch("test")}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/10 text-[11px] font-semibold flex items-center gap-1.5 self-start sm:self-auto transition-all"
+            >
+              <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+              <span>🧪 Test Giả Lập Rời Tab</span>
+            </button>
+          </div>
+        )}
 
         {/* SUBMISSION RESULT BANNER (If submitted) */}
         {submissionResult && (
@@ -374,6 +472,17 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
                   0 lần rời tab (Làm bài nghiêm túc 100%)
                 </span>
               )}
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={handleRetakeExam}
+                disabled={isRetaking}
+                className="px-5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs shadow-lg shadow-cyan-400/20 inline-flex items-center gap-2 transition-all"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Làm Lại Bài Thi Này</span>
+              </button>
             </div>
           </div>
         )}
@@ -505,7 +614,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               </p>
 
               {tabSwitchCount > 0 && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center justify-center gap-2">
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center justify-center gap-2">
                   <AlertTriangle className="w-4 h-4" />
                   <span>Hệ thống ghi nhận bạn đã rời tab {tabSwitchCount} lần!</span>
                 </div>

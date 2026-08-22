@@ -438,3 +438,30 @@ export async function submitStudentExam(payload: {
     answers,
   };
 }
+
+/**
+ * Xóa kết quả bài thi cũ để học sinh làm lại (Dành cho kiểm thử hoặc cho phép thi lại)
+ */
+export async function resetStudentSubmission(examId: string) {
+  if (!examId) return { error: "Thiếu ID đề thi!" };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Chưa đăng nhập!" };
+
+  const adminClient = createAdminClient();
+  const { error } = await adminClient
+    .from("exam_submissions")
+    .delete()
+    .eq("exam_id", examId)
+    .eq("student_id", user.id);
+
+  if (error) {
+    return { error: `Lỗi đặt lại bài thi: ${error.message}` };
+  }
+
+  revalidatePath("/student/exams");
+  revalidatePath(`/student/exams/${examId}`);
+  revalidatePath("/dashboard/submissions");
+  return { success: true };
+}
