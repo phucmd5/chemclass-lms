@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { getTeacherClasses } from "@/app/actions/classes";
 import { getTeacherSchedules } from "@/app/actions/schedules";
+import { getTeacherTuitionData } from "@/app/actions/tuition";
 import { getCurrentProfile } from "@/app/actions/auth";
 import {
   Users,
@@ -13,12 +14,17 @@ import {
   PlusCircle,
   Clock,
   GraduationCap,
+  CreditCard,
+  CheckCircle2,
 } from "lucide-react";
 
 export default async function TeacherDashboardPage() {
   const profile = await getCurrentProfile();
-  const classes = await getTeacherClasses();
-  const schedules = await getTeacherSchedules();
+  const [classes, schedules, tuitionData] = await Promise.all([
+    getTeacherClasses(),
+    getTeacherSchedules(),
+    getTeacherTuitionData(),
+  ]);
 
   const totalStudents = classes.reduce((acc, c) => acc + (c.studentCount || 0), 0);
   const upcomingSchedules = schedules.slice(0, 5);
@@ -36,8 +42,8 @@ export default async function TeacherDashboardPage() {
             Xin chào, {profile?.full_name || "Thầy/Cô"}!
           </h1>
           <p className="text-sm text-slate-300 mt-2 leading-relaxed">
-            Hôm nay bạn đang quản lý <strong className="text-indigo-300">{classes.length} lớp học</strong> với tổng cộng{" "}
-            <strong className="text-cyan-300">{totalStudents} học sinh</strong>. Hãy tạo buổi học mới hoặc soạn đề thi trắc nghiệm bằng AI!
+            Hôm nay bạn đang quản lý <strong className="text-indigo-300">{classes.length} lớp học</strong> THCS với tổng cộng{" "}
+            <strong className="text-cyan-300">{totalStudents} học sinh</strong>. Hãy tạo buổi học mới, kiểm tra học phí hoặc soạn đề thi trắc nghiệm bằng AI!
           </p>
 
           <div className="flex flex-wrap gap-3 mt-6">
@@ -47,6 +53,13 @@ export default async function TeacherDashboardPage() {
             >
               <PlusCircle className="w-4 h-4" />
               <span>Tạo lớp học mới</span>
+            </Link>
+            <Link
+              href="/dashboard/tuition"
+              className="px-4 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-sm font-semibold flex items-center gap-2 transition-all"
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>Quản lý Học phí</span>
             </Link>
             <Link
               href="/dashboard/exams"
@@ -60,7 +73,7 @@ export default async function TeacherDashboardPage() {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-sm">
           <div className="flex items-center justify-between text-slate-400 mb-3">
             <span className="text-xs font-semibold uppercase tracking-wider">Tổng số Lớp</span>
@@ -82,10 +95,25 @@ export default async function TeacherDashboardPage() {
         <div className="p-5 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-sm">
           <div className="flex items-center justify-between text-slate-400 mb-3">
             <span className="text-xs font-semibold uppercase tracking-wider">Lịch dạy sắp tới</span>
-            <Calendar className="w-5 h-5 text-emerald-400" />
+            <Calendar className="w-5 h-5 text-indigo-400" />
           </div>
           <div className="text-3xl font-bold text-white">{schedules.length}</div>
           <p className="text-xs text-slate-400 mt-1">Buổi học trong danh sách</p>
+        </div>
+
+        <div className="p-5 rounded-2xl bg-slate-900/60 border border-emerald-500/30 backdrop-blur-sm">
+          <div className="flex items-center justify-between text-emerald-400 mb-3">
+            <span className="text-xs font-semibold uppercase tracking-wider">Học phí đã thu</span>
+            <CreditCard className="w-5 h-5" />
+          </div>
+          <div className="text-2xl font-bold text-emerald-400">
+            {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
+              tuitionData.stats.totalPaid
+            )}
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {tuitionData.stats.paidCount}/{tuitionData.invoices.length} học sinh đã đóng
+          </p>
         </div>
       </div>
 
