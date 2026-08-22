@@ -179,10 +179,13 @@ export async function getTeacherExams() {
 }
 
 /**
- * Lấy chi tiết đề thi kèm danh sách câu hỏi
+ * Lấy chi tiết đề thi kèm danh sách câu hỏi & kết quả bài làm của học sinh (nếu đã nộp)
  */
 export async function getExamWithQuestions(examId: string) {
   if (!examId) return null;
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
   const adminClient = createAdminClient();
 
@@ -207,10 +210,25 @@ export async function getExamWithQuestions(examId: string) {
     .eq("exam_id", examId)
     .order("order_index", { ascending: true });
 
+  let mySubmission: any = null;
+  if (user) {
+    const { data: sub } = await adminClient
+      .from("exam_submissions")
+      .select("*")
+      .eq("exam_id", examId)
+      .eq("student_id", user.id)
+      .single();
+
+    if (sub) {
+      mySubmission = sub;
+    }
+  }
+
   return {
     ...exam,
     classes: Array.isArray(exam.classes) ? exam.classes[0] : exam.classes,
     questions: questions || [],
+    mySubmission,
   };
 }
 
@@ -336,7 +354,7 @@ export async function getStudentExams() {
  */
 export async function submitStudentExam(payload: {
   examId: string;
-  answers: Record<string, string>; // { [questionId]: "A" | "B" | ... }
+  answers: Record<string, string>;
   tabSwitchCount: number;
   blurEventsLog: Array<{ time: string; event: string }>;
 }) {
@@ -382,8 +400,10 @@ export async function submitStudentExam(payload: {
   }
 
   const finalScore = Math.round(earnedPoints * 100) / 100;
+  const safeTabSwitchCount = Number(tabSwitchCount) || 0;
+  const safeBlurEventsLog = Array.isArray(blurEventsLog) ? blurEventsLog : [];
 
-  // 3. Ghi nhận kết quả vào bảng exam_submissions
+  // 3. Ghi nhận kết quả vào bảng exam_submissions (vượt qua RLS bằng adminClient)
   const { data: submission, error: subErr } = await adminClient
     .from("exam_submissions")
     .upsert(
@@ -392,8 +412,8 @@ export async function submitStudentExam(payload: {
         student_id: user.id,
         score: finalScore,
         answers_json: answers,
-        tab_switch_count: tabSwitchCount || 0,
-        blur_events_log: blurEventsLog || [],
+        tab_switch_count: safeTabSwitchCount,
+        blur_events_log: safeBlurEventsLog,
         submitted_at: new Date().toISOString(),
       },
       { onConflict: "exam_id,student_id" }
@@ -402,6 +422,7 @@ export async function submitStudentExam(payload: {
     .single();
 
   if (subErr) {
+    console.error("Lỗi upsert bài nộp:", subErr);
     return { error: `Lỗi lưu bài thi: ${subErr.message}` };
   }
 
@@ -412,6 +433,8 @@ export async function submitStudentExam(payload: {
     success: true,
     score: finalScore,
     totalPoints: totalExamPoints,
-    tabSwitchCount: tabSwitchCount || 0,
+    tabSwitchCount: safeTabSwitchCount,
+    blurEventsLog: safeBlurEventsLog,
+    answers,
   };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, use, useRef } from "react";
+import React, { useState, useEffect, use, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getExamWithQuestions, submitStudentExam } from "@/app/actions/exams";
@@ -19,6 +19,8 @@ import {
   Check,
   X,
   ShieldAlert,
+  ShieldCheck,
+  AlertOctagon,
 } from "lucide-react";
 
 export default function ExamTakingPage({ params }: { params: Promise<{ id: string }> }) {
@@ -40,6 +42,12 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   const [blurEventsLog, setBlurEventsLog] = useState<Array<{ time: string; event: string }>>([]);
   const [proctorWarning, setProctorWarning] = useState<string | null>(null);
 
+  // Refs để luôn lưu trữ giá trị mới nhất (tránh lỗi stale closure của React)
+  const tabSwitchCountRef = useRef<number>(0);
+  const blurEventsLogRef = useRef<Array<{ time: string; event: string }>>([]);
+  const lastSwitchTimeRef = useRef<number>(0);
+  const hasSubmittedRef = useRef<boolean>(false);
+
   // Tải thông tin đề thi
   async function loadExam() {
     setLoading(true);
@@ -47,17 +55,42 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     setExam(data);
 
     if (data) {
-      // Khôi phục câu trả lời đã lưu từ localStorage (nếu có)
-      const savedAnswers = localStorage.getItem(`chemclass_exam_${examId}_answers`);
-      if (savedAnswers) {
-        try {
-          setAnswers(JSON.parse(savedAnswers));
-        } catch {}
-      }
+      // Nếu học sinh đã nộp bài trước đó
+      if (data.mySubmission) {
+        setSubmissionResult({
+          score: data.mySubmission.score,
+          totalPoints: data.total_points || 10,
+          tabSwitchCount: data.mySubmission.tab_switch_count || 0,
+          blurEventsLog: data.mySubmission.blur_events_log || [],
+        });
+        setAnswers(data.mySubmission.answers_json || {});
+        setTabSwitchCount(data.mySubmission.tab_switch_count || 0);
+        hasSubmittedRef.current = true;
+      } else {
+        // Khôi phục câu trả lời đã lưu từ localStorage (nếu có)
+        const savedAnswers = localStorage.getItem(`chemclass_exam_${examId}_answers`);
+        if (savedAnswers) {
+          try {
+            setAnswers(JSON.parse(savedAnswers));
+          } catch {}
+        }
 
-      // Khởi tạo thời gian làm bài
-      const durationSec = (data.duration_minutes || 45) * 60;
-      setTimeLeft(durationSec);
+        // Khôi phục số lần rời tab từ localStorage nếu có
+        const savedProctor = localStorage.getItem(`chemclass_exam_${examId}_proctor`);
+        if (savedProctor) {
+          try {
+            const parsed = JSON.parse(savedProctor);
+            tabSwitchCountRef.current = parsed.count || 0;
+            blurEventsLogRef.current = parsed.log || [];
+            setTabSwitchCount(parsed.count || 0);
+            setBlurEventsLog(parsed.log || []);
+          } catch {}
+        }
+
+        // Khởi tạo thời gian làm bài
+        const durationSec = (data.duration_minutes || 45) * 60;
+        setTimeLeft(durationSec);
+      }
     }
     setLoading(false);
   }
@@ -65,6 +98,72 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   useEffect(() => {
     loadExam();
   }, [examId]);
+
+  // Hàm ghi nhận sự kiện rời khỏi màn hình thi
+  const recordTabSwitch = useCallback((eventType: string) => {
+    if (hasSubmittedRef.current) return;
+
+    const now = Date.now();
+    // Tránh tính trùng khi visibilitychange và blur cùng kích hoạt trong 700ms
+    if (now - lastSwitchTimeRef.current < 700) {
+      return;
+    }
+    lastSwitchTimeRef.current = now;
+
+    tabSwitchCountRef.current += 1;
+    const newCount = tabSwitchCountRef.current;
+    setTabSwitchCount(newCount);
+
+    const eventDesc =
+      eventType === "hidden"
+        ? "Chuyển sang tab khác / Thu nhỏ trình duyệt (Document Hidden)"
+        : "Chuyển sang ứng dụng khác (Window Blur)";
+
+    const newLogItem = {
+      time: new Date().toISOString(),
+      event: eventDesc,
+    };
+
+    blurEventsLogRef.current = [...blurEventsLogRef.current, newLogItem];
+    setBlurEventsLog(blurEventsLogRef.current);
+
+    // Lưu vào localStorage chống mất dữ liệu khi F5
+    localStorage.setItem(
+      `chemclass_exam_${examId}_proctor`,
+      JSON.stringify({
+        count: newCount,
+        log: blurEventsLogRef.current,
+      })
+    );
+
+    // Bật cảnh báo nổi bật trên màn hình
+    setProctorWarning(
+      `⚠️ CẢNH BÁO GIAN LẬN: Bạn vừa rời khỏi màn hình làm bài (Lần thứ ${newCount})! Sự việc đã được ghi nhận vào hệ thống.`
+    );
+  }, [examId]);
+
+  // Lắng nghe sự kiện chuyển Tab / Rời cửa sổ (Soft Proctoring)
+  useEffect(() => {
+    if (!exam || submissionResult) return;
+
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        recordTabSwitch("hidden");
+      }
+    }
+
+    function handleWindowBlur() {
+      recordTabSwitch("blur");
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [exam, submissionResult, recordTabSwitch]);
 
   // Bộ đếm ngược thời gian
   useEffect(() => {
@@ -84,52 +183,9 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     return () => clearInterval(timer);
   }, [exam, submissionResult, timeLeft]);
 
-  // Giám sát chuyển Tab (Soft Proctoring)
-  useEffect(() => {
-    if (!exam || submissionResult) return;
-
-    function handleVisibilityChange() {
-      if (document.hidden) {
-        setTabSwitchCount((prev) => {
-          const next = prev + 1;
-          setProctorWarning(`⚠️ Cảnh báo: Bạn vừa rời khỏi màn hình làm bài (Lần ${next})! Hệ thống đã ghi nhận log.`);
-          setTimeout(() => setProctorWarning(null), 5000);
-          return next;
-        });
-
-        setBlurEventsLog((prev) => [
-          ...prev,
-          { time: new Date().toISOString(), event: "document_hidden" },
-        ]);
-      }
-    }
-
-    function handleWindowBlur() {
-      setTabSwitchCount((prev) => {
-        const next = prev + 1;
-        setProctorWarning(`⚠️ Cảnh báo: Bạn vừa chuyển cửa sổ khác (Lần ${next})!`);
-        setTimeout(() => setProctorWarning(null), 5000);
-        return next;
-      });
-
-      setBlurEventsLog((prev) => [
-        ...prev,
-        { time: new Date().toISOString(), event: "window_blur" },
-      ]);
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleWindowBlur);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleWindowBlur);
-    };
-  }, [exam, submissionResult]);
-
   // Chọn đáp án
   function handleSelectOption(questionId: string, optionKey: string) {
-    if (submissionResult) return; // Đã nộp bài thì không sửa
+    if (submissionResult) return;
 
     const updated = { ...answers, [questionId]: optionKey };
     setAnswers(updated);
@@ -146,12 +202,13 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   async function submitAnswers() {
     setIsSubmitting(true);
     setShowConfirmModal(false);
+    hasSubmittedRef.current = true;
 
     const res = await submitStudentExam({
       examId,
       answers,
-      tabSwitchCount,
-      blurEventsLog,
+      tabSwitchCount: tabSwitchCountRef.current,
+      blurEventsLog: blurEventsLogRef.current,
     });
 
     setIsSubmitting(false);
@@ -161,6 +218,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
     } else {
       setSubmissionResult(res);
       localStorage.removeItem(`chemclass_exam_${examId}_answers`);
+      localStorage.removeItem(`chemclass_exam_${examId}_proctor`);
     }
   }
 
@@ -198,16 +256,24 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-slate-100 py-6 px-4 sm:px-6">
       <div className="max-w-4xl mx-auto space-y-6">
-        {/* Soft Proctoring Warning Toast */}
+        {/* MODAL / BANNER CẢNH BÁO RỜI TAB NỔI BẬT */}
         {proctorWarning && (
-          <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 p-4 rounded-2xl bg-amber-600 text-white font-bold text-xs shadow-2xl flex items-center gap-2.5 animate-bounce">
-            <ShieldAlert className="w-5 h-5 flex-shrink-0" />
-            <span>{proctorWarning}</span>
+          <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-xl p-4 rounded-2xl bg-rose-600 border-2 border-white/20 text-white font-bold text-xs shadow-2xl flex items-center justify-between gap-3 animate-bounce">
+            <div className="flex items-center gap-2.5">
+              <AlertOctagon className="w-6 h-6 flex-shrink-0 animate-spin text-amber-300" />
+              <span>{proctorWarning}</span>
+            </div>
+            <button
+              onClick={() => setProctorWarning(null)}
+              className="px-3 py-1 rounded-xl bg-black/30 hover:bg-black/50 text-white text-[11px] font-bold uppercase transition-all flex-shrink-0"
+            >
+              Tôi Đã Hiểu
+            </button>
           </div>
         )}
 
-        {/* Top Sticky Header: Timer, Questions Nav, Submit */}
-        <div className="sticky top-4 z-40 p-4 rounded-2xl bg-slate-900/90 border border-white/10 backdrop-blur-xl shadow-2xl flex items-center justify-between gap-4 flex-wrap">
+        {/* Top Sticky Header: Timer, Questions Nav, Proctoring Badge, Submit */}
+        <div className="sticky top-4 z-40 p-4 rounded-2xl bg-slate-900/95 border border-white/10 backdrop-blur-xl shadow-2xl flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
             <Link
               href="/student/exams"
@@ -218,7 +284,7 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
             </Link>
 
             <div>
-              <h1 className="text-sm font-bold text-white truncate max-w-[250px] sm:max-w-md">
+              <h1 className="text-sm font-bold text-white truncate max-w-[200px] sm:max-w-sm">
                 {exam.title}
               </h1>
               <p className="text-[11px] text-slate-400">
@@ -227,7 +293,20 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* HUY HIỆU GIÁM SÁT RỜI TAB THỜI GIAN THỰC (LIVE PROCTORING BADGE) */}
+            {tabSwitchCount === 0 ? (
+              <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Giám sát: 0 lần rời tab</span>
+              </span>
+            ) : (
+              <span className="px-3 py-1.5 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/50 text-xs font-black flex items-center gap-1.5 animate-pulse shadow-lg shadow-rose-500/20">
+                <ShieldAlert className="w-4 h-4 text-rose-400" />
+                <span>ĐÃ RỜI TAB: {tabSwitchCount} LẦN!</span>
+              </span>
+            )}
+
             {/* Live Countdown Timer */}
             {!submissionResult && (
               <div
@@ -280,12 +359,22 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
               </p>
             </div>
 
-            {submissionResult.tabSwitchCount > 0 && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                <span>Hệ thống ghi nhận {submissionResult.tabSwitchCount} lần rời tab thi</span>
+            {/* Thống kê giám sát rời tab */}
+            <div className="inline-flex flex-col sm:flex-row items-center gap-2 p-3 rounded-2xl bg-slate-950/80 border border-white/10 text-xs">
+              <div className="flex items-center gap-1.5 font-semibold text-slate-300">
+                <ShieldAlert className="w-4 h-4 text-amber-400" />
+                <span>Kết quả giám sát:</span>
               </div>
-            )}
+              {submissionResult.tabSwitchCount > 0 ? (
+                <span className="font-bold text-rose-400">
+                  Hệ thống phát hiện {submissionResult.tabSwitchCount} lần rời khỏi màn hình làm bài
+                </span>
+              ) : (
+                <span className="font-bold text-emerald-400">
+                  0 lần rời tab (Làm bài nghiêm túc 100%)
+                </span>
+              )}
+            </div>
           </div>
         )}
 
@@ -412,8 +501,15 @@ export default function ExamTakingPage({ params }: { params: Promise<{ id: strin
 
               <h3 className="text-lg font-bold text-white">Xác nhận nộp bài thi?</h3>
               <p className="text-xs text-slate-400">
-                Bạn đã hoàn thành <strong>{answeredCount}/{questions.length}</strong> câu hỏi. Sau khi nộp bài, hệ thống sẽ tự động chấm điểm và bạn không thể sửa đổi câu trả lời.
+                Bạn đã hoàn thành <strong>{answeredCount}/{questions.length}</strong> câu hỏi.
               </p>
+
+              {tabSwitchCount > 0 && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center justify-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Hệ thống ghi nhận bạn đã rời tab {tabSwitchCount} lần!</span>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-3">
                 <button
